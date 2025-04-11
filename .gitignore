@@ -1,0 +1,23 @@
+# Node
+node_modules/
+.env
+
+# Expo/React Native
+.expo/
+.expo-shared/
+*.log
+*.sqlite
+*.keystore
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Builds
+dist/
+build/
+
+# Outros
+*.lock
