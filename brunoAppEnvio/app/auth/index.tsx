@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Import AsyncStorage
 import { useRouter } from 'expo-router';
 import httpService from '../services/httpService';
 
@@ -25,8 +26,8 @@ export default function LoginScreen() {
       const response = await httpService.post(loginUrl, { email, password });
       const { token } = response.data;
 
-      // Salvar o token no armazenamento local (opcional)
-      // AsyncStorage.setItem('authToken', token);
+      // Salvar o token no AsyncStorage
+      await AsyncStorage.setItem('authToken', token);
 
       Alert.alert('Sucesso', 'Login realizado com sucesso!');
       router.replace('/(tabs)');
