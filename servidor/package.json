@@ -1,0 +1,19 @@
+{
+  "name": "ai-ecommerce-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node ./src/index.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "mongoose": "^8.13.2",
+    "mongose": "^0.0.2-security",
+    "mysql2": "^3.14.0",
+    "sequelize": "^6.37.7"
+  }
+}
