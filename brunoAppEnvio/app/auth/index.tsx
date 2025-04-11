@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
+import httpService from '../services/httpService';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const SERVER_URL = 'http://192.168.18.224:3000';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -12,13 +14,25 @@ export default function LoginScreen() {
     return regex.test(email);
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!validarEmail(email)) {
       Alert.alert('Erro', 'Formato de email inválido.');
       return;
     }
 
-    router.replace('/(tabs)');
+    try {
+      const loginUrl = `${SERVER_URL}/api/login`;
+      const response = await httpService.post(loginUrl, { email, password });
+      const { token } = response.data;
+
+      // Salvar o token no armazenamento local (opcional)
+      // AsyncStorage.setItem('authToken', token);
+
+      Alert.alert('Sucesso', 'Login realizado com sucesso!');
+      router.replace('/(tabs)');
+    } catch (error) {
+      Alert.alert('Erro', 'Credenciais inválidas ou erro no servidor.');
+    }
   };
 
   return (

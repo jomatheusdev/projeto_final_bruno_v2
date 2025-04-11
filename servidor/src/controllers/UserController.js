@@ -1,5 +1,7 @@
 import user from '../models/UserModel.js'; 
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 
 dotenv.config();
 
@@ -47,8 +49,24 @@ const userController = {
     }
   },
 
-  login: (req, res) => {
-    res.status(200).json({ message: 'Login ainda não implementado' });
+  login: async (req, res) => {
+    const { email, password } = req.body;
+    try {
+      const userRecord = await user.findOne({ where: { email } });
+      if (!userRecord || !(await bcrypt.compare(password, userRecord.password))) {
+        return res.status(401).json({ message: 'Credenciais inválidas' });
+      }
+
+      const token = jwt.sign(
+        { id: userRecord.id, role: userRecord.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+
+      res.status(200).json({ token });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
   }
 };
 
