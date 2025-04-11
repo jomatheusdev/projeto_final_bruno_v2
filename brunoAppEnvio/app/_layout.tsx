@@ -8,8 +8,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     async function checkLoginStatus() {
-      const token = await AsyncStorage.getItem('authToken'); // Recupera o token
-
+      const token = await AsyncStorage.getItem('authToken');
       if (token) {
         router.replace("/(tabs)");
       } else {
@@ -18,7 +17,7 @@ export default function RootLayout() {
     }
 
     checkLoginStatus();
-  }, [router]); // Adiciona `router` como dependência
+  }, [router]);
 
   return (
     <CartProvider>
