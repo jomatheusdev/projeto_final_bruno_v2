@@ -6,7 +6,7 @@ import httpService from '../services/httpService';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const SERVER_URL = 'http://192.168.18.224:3000';
+  const SERVER_URL = 'http://192.168.1.11:3000';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
