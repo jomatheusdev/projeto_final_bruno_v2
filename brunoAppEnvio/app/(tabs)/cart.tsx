@@ -45,14 +45,7 @@ export default function CartScreen() {
   };
 
   const handleRemoveItem = (itemId: string, itemName: string) => {
-    Alert.alert(
-      "Remover item",
-      `Deseja remover ${itemName} do carrinho?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Remover", onPress: () => removeFromCart(itemId), style: "destructive" }
-      ]
-    );
+    removeFromCart(itemId);
   };
 
   const startCheckout = () => {
