@@ -82,8 +82,8 @@ initializeGemini();
 
 const aiService = {
   // Registra uma nova conexão WebSocket
-  registerConnection: (userId, ws, sessionId) => {
-    connections.set(userId, { ws, sessionId });
+  registerConnection: (userId, ws, sessionId, userName = 'Usuário') => {
+    connections.set(userId, { ws, sessionId, userName });
     
     // Inicializa histórico de sessão se necessário
     if (!sessionMessages.has(sessionId)) {
@@ -104,6 +104,7 @@ const aiService = {
       type: 'api_status',
       available: isGeminiAvailable,
       model: currentModelName,
+      userName: userName, // Adiciona nome do usuário na resposta
       message: isGeminiAvailable ? 
         `API Gemini conectada e funcionando com modelo: ${currentModelName}` : 
         'API Gemini não está disponível. O assistente responderá com mensagens padrão.'
@@ -183,6 +184,23 @@ const aiService = {
     });
   },
   
+  // Atualiza informações do usuário para conexões existentes
+  updateUserInfo: (userId, userName) => {
+    const connection = connections.get(userId);
+    if (connection) {
+      connection.userName = userName;
+      logAI(`Atualizado nome de usuário para conexão ${userId}: ${userName}`);
+      
+      // Notifica o cliente sobre a atualização do nome de usuário
+      if (connection.ws.readyState === 1) {
+        connection.ws.send(JSON.stringify({
+          type: 'user_info_update',
+          userName: userName
+        }));
+      }
+    }
+  },
+  
   // Envia mensagem para todos os usuários na mesma sessão
   broadcastToSession: (sessionId, message) => {
     connections.forEach((connection, userId) => {
@@ -257,6 +275,14 @@ const aiService = {
       const conversationContext = recentMessages
         .map(msg => `${msg.userName}: ${msg.text}`)
         .join('\n');
+      
+      // Garante que o nome do usuário está sendo usado corretamente
+      const connection = Array.from(connections.values())
+        .find(conn => conn.sessionId === sessionId && conn.ws.readyState === 1);
+      
+      if (connection && connection.userName) {
+        userMessage.userName = connection.userName;
+      }
       
       // Verificar se é uma intenção de listar produtos
       const isListCommand = isListProductsCommand(userMessage.text);

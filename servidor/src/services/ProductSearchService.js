@@ -377,6 +377,86 @@ const ProductSearchService = {
     }
   },
 
+  // Busca todas as compras de um usuário sem limite de quantidade
+  getAllUserOrders: async (userId) => {
+    try {
+      if (!userId) {
+        return { success: false, message: 'ID do usuário é obrigatório' };
+      }
+
+      const orders = await Order.findAll({
+        where: { userId: userId },
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            include: [{
+              model: Product,
+              attributes: ['name', 'price', 'imageUrl', 'description']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+
+      if (orders.length === 0) {
+        return { 
+          success: true, 
+          message: 'Nenhuma compra encontrada para este usuário',
+          orders: []
+        };
+      }
+
+      // Formata os dados para um formato mais amigável para a IA
+      const formattedOrders = orders.map(order => {
+        const formattedDate = new Date(order.createdAt).toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        const items = order.items.map(item => ({
+          productId: item.productId,
+          productName: item.Product?.name || 'Produto não encontrado',
+          quantity: item.quantity,
+          unitPrice: parseFloat(item.price),
+          total: parseFloat(item.price) * item.quantity
+        }));
+
+        const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+        const uniqueProducts = items.length;
+
+        return {
+          orderId: order.id,
+          date: formattedDate,
+          timestamp: order.createdAt,
+          total: parseFloat(order.total),
+          paymentMethod: order.paymentMethod,
+          status: order.status,
+          items: items,
+          totalItems: totalItems,
+          uniqueProducts: uniqueProducts
+        };
+      });
+
+      logAI(`Histórico completo de compras recuperado para usuário ${userId}: ${formattedOrders.length} pedidos`);
+      
+      return {
+        success: true,
+        message: `${formattedOrders.length} compras encontradas`,
+        orders: formattedOrders
+      };
+    } catch (error) {
+      logAI(`Erro ao buscar histórico completo de compras para usuário ${userId}:`, error);
+      return {
+        success: false,
+        message: 'Erro ao buscar histórico de compras'
+      };
+    }
+  },
+
   // Obter detalhes específicos de um pedido
   getOrderDetails: async (orderId, userId) => {
     try {

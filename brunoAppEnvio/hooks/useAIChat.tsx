@@ -65,22 +65,109 @@ export const useAIChat = (addToCart: (product: Product) => void, removeFromCart:
             });
             
             if (response.data && response.data.name) {
-              setUserName(response.data.name);
-              console.log('Nome do usuário definido:', response.data.name);
+              const userName = response.data.name;
+              setUserName(userName);
+              console.log('Nome do usuário definido:', userName);
+              
+              // Importante: Criar serviço de AI após obter nome do usuário
+              setupAIService(userName, token);
+              
+              // Se o serviço já existir, atualiza o nome do usuário
+              if (aiServiceRef.current) {
+                aiServiceRef.current.updateUserName(userName);
+              }
+            } else {
+              setupAIService('Usuário', token);
             }
           } catch (fetchError) {
             console.error('Erro ao buscar dados do usuário:', fetchError);
             setUserName(`Usuário #${userId}`);
+            setupAIService(`Usuário #${userId}`, token);
           }
+        } else {
+          setupAIService('Usuário', token);
         }
+      } else {
+        setupAIService('Usuário', null);
       }
     } catch (error) {
       console.error('Erro ao recuperar dados do usuário:', error);
-    } finally {
-      // Garantir que o nome do usuário seja usado na conexão
-      console.log('Conectando WebSocket com nome de usuário:', userName);
-      connectWebSocket();
+      setupAIService('Usuário', null);
     }
+  };
+  
+  // Configura e conecta o serviço de IA
+  const setupAIService = (name: string, token: string | null) => {
+    console.log(`Configurando serviço AI para usuário: ${name}`);
+    
+    const aiService = new AIService(name, {
+      onConnected: (userId, message) => {
+        setIsConnected(true);
+        setIsLoading(false);
+        setUserId(userId);
+        if (reconnectAttempts === 0) {
+          Alert.alert('Conectado', message);
+        }
+        setReconnectAttempts(0);
+      },
+      onMessage: (message) => {
+        handleReceivedMessage(message);
+      },
+      onHistory: (messages) => {
+        setMessages(messages);
+      },
+      onApiStatus: (available) => {
+        setIsApiAvailable(available);
+        if (!available) {
+          Alert.alert(
+            'Aviso',
+            'A API da IA não está configurada corretamente. As respostas serão limitadas.',
+            [{ text: 'OK' }]
+          );
+        }
+      },
+      onConnectionClosed: (code) => {
+        setIsConnected(false);
+        setIsLoading(false);
+        
+        if (autoReconnect) {
+          if (reconnectAttempts < 10) {
+            const reconnectDelay = getReconnectDelay();
+            
+            if (reconnectTimeoutRef.current) {
+              clearTimeout(reconnectTimeoutRef.current);
+            }
+            
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (autoReconnect) {
+                setReconnectAttempts(prev => prev + 1);
+                connectWebSocket();
+              }
+            }, reconnectDelay);
+          } else {
+            setAutoReconnect(false);
+            Alert.alert(
+              'Falha na Conexão',
+              'Não foi possível restabelecer a conexão após várias tentativas. Por favor, tente reconectar manualmente mais tarde.',
+              [{ text: 'OK' }]
+            );
+          }
+        }
+      },
+      onConnectionError: (error) => {
+        console.error('Erro na conexão WebSocket:', error);
+        setIsConnected(false);
+        setIsLoading(false);
+      }
+    });
+    
+    // Define o token de autenticação
+    if (token) {
+      aiService.setAuthToken(token);
+    }
+    
+    aiServiceRef.current = aiService;
+    aiService.connect();
   };
 
   // Controle de reconexão

@@ -26,11 +26,18 @@ export class AIService {
   private serverUrl: string = 'ws://192.168.0.105:3000';
   private events: AIServiceEvents;
   private userName: string;
+  private authToken: string | null = null;
 
   constructor(userName: string, events: AIServiceEvents) {
     this.userName = userName;
     this.events = events;
     this.sessionId = Date.now().toString();
+  }
+
+  // Método para definir o token de autenticação
+  public setAuthToken(token: string | null): void {
+    this.authToken = token;
+    console.log('Token de autenticação atualizado');
   }
 
   // Adicionando um método para atualizar o nome do usuário
@@ -41,7 +48,11 @@ export class AIService {
 
   public connect(): void {
     try {
-      const socketUrl = `${this.serverUrl}?sessionId=${this.sessionId}`;
+      // Inclui o token na URL de conexão
+      let socketUrl = `${this.serverUrl}?sessionId=${this.sessionId}`;
+      if (this.authToken) {
+        socketUrl += `&token=${encodeURIComponent(this.authToken)}`;
+      }
       console.log(`Tentando conectar ao WebSocket...`);
 
       this.ws = new WebSocket(socketUrl);
@@ -55,8 +66,20 @@ export class AIService {
           const data = JSON.parse(event.data);
 
           if (data.type === 'connected') {
+            // Atualiza o nome do usuário se o servidor fornecer
+            if (data.userName) {
+              this.userName = data.userName;
+              console.log('Nome do usuário recebido do servidor:', data.userName);
+            }
             this.events.onConnected(data.userId, data.message);
           } 
+          else if (data.type === 'user_info_update') {
+            // Tratamento para atualizações de informações do usuário
+            if (data.userName) {
+              this.userName = data.userName;
+              console.log('Nome do usuário atualizado pelo servidor:', data.userName);
+            }
+          }
           else if (data.type === 'message') {
             console.log('Mensagem recebida:', JSON.stringify(data.message));
             const processedMessage = this.processAIMessage(data.message);
