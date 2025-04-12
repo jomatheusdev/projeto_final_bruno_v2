@@ -248,32 +248,25 @@ const Chat = () => {
   };
 
   const startNewConversation = () => {
+    console.log('Função startNewConversation chamada');
     if (ws.current && isConnected) {
-      Alert.alert(
-        "Nova Conversa", 
-        "Deseja iniciar uma nova conversa?",
-        [
-          { text: "Cancelar", style: "cancel" },
-          { 
-            text: "Iniciar", 
-            style: "default",
-            onPress: () => {
-              try {
-                ws.current?.send(JSON.stringify({
-                  type: 'new_conversation',
-                  sessionId: sessionId
-                }));
-                setProductsToShow([]);
-                setShowProductList(false);
-              } catch (error) {
-                console.error('Erro ao enviar comando de nova conversa:', error);
-                Alert.alert('Erro', 'Não foi possível iniciar uma nova conversa');
-              }
-            }
-          }
-        ]
-      );
+      try {
+        console.log('WebSocket está conectado, enviando comando para o servidor');
+        // Limpa as mensagens existentes antes de iniciar nova conversa
+        setMessages([]);
+        ws.current.send(JSON.stringify({
+          type: 'new_conversation',
+          sessionId: sessionId
+        }));
+        console.log('Comando enviado com sucesso:', { type: 'new_conversation', sessionId });
+        setProductsToShow([]);
+        setShowProductList(false);
+      } catch (error) {
+        console.error('Erro ao enviar comando de nova conversa:', error);
+        Alert.alert('Erro', 'Não foi possível iniciar uma nova conversa');
+      }
     } else {
+      console.log('WebSocket não está conectado:', { wsExists: !!ws.current, isConnected });
       Alert.alert('Erro', 'Você precisa estar conectado para iniciar uma nova conversa');
     }
   };
@@ -400,7 +393,10 @@ const Chat = () => {
         <View style={styles.headerButtons}>
           <TouchableOpacity 
             style={styles.newChatButton}
-            onPress={startNewConversation}
+            onPress={() => {
+              console.log('Botão Nova Conversa pressionado');
+              startNewConversation();
+            }}
           >
             <Ionicons name="chatbubble-outline" size={20} color="white" />
             <Text style={styles.newChatButtonText}>Nova Conversa</Text>
