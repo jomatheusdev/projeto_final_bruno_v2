@@ -6,7 +6,7 @@ import httpService from '../services/httpService';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const SERVER_URL = 'http://192.168.1.11:3000'
+  const SERVER_URL = 'http://192.168.0.105:3000'
   const [name, setName] = useState('');
   const [cpf, setCpf] = useState('');
   const [email, setEmail] = useState('');

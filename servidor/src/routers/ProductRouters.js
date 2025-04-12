@@ -5,9 +5,9 @@ import authMiddleware from '../middlewares/authMiddleware.js';
 const router = express.Router();
 
 router.route('/product')
-  .get(authMiddleware, (req, res) => productController.findALL(req, res)); // Protegido
+  .get(authMiddleware, productController.findALL);  // Corrigido para não usar callback anônima
 
 router.route('/product/:id')
-  .get(authMiddleware, (req, res) => productController.findOne(req, res)); // Protegido
+  .get(authMiddleware, productController.findOne);  // Corrigido para não usar callback anônima
 
 export default router;
