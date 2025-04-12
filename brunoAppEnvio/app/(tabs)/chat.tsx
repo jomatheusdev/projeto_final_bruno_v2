@@ -83,7 +83,9 @@ const Balloon = ({
   return (
     <View style={[styles.bubbleWrapper, bubbleWrapper]}>
       <View style={[styles.balloon, balloonColor]}>
-        <Text style={{ fontSize: 12, marginBottom: 2 }}>{message.sentBy}</Text>
+        <Text style={[styles.senderName, balloonTextColor]}>
+          {message.sentBy}
+        </Text>
         <Text style={[styles.balloonText, balloonTextColor]}>
           {message.text}
         </Text>
@@ -92,6 +94,7 @@ const Balloon = ({
   );
 };
 
+  
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -110,6 +113,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderColor: '#ddd',
+  },
+  senderName: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: '#1f6feb',
+  },
+  balloonSent: {
+    backgroundColor: '#007bff', 
   },
 
   input: {
@@ -145,10 +157,10 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 16,
     maxWidth: '80%',
+    minWidth: 100, 
+    flexShrink: 1,
   },
-  balloonSent: {
-    backgroundColor: '#007bff',
-  },
+ 
   balloonReceived: {
     backgroundColor: '#e5e5ea',
   },

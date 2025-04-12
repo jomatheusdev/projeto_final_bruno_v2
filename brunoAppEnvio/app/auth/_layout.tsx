@@ -5,7 +5,6 @@ export default function AuthLayout() {
     <Stack>
       <Stack.Screen name="index" options={{ title: 'Login' }} />
       <Stack.Screen name="register" options={{ title: 'Registro' }} />
-      {/* <Stack.Screen name="chat" options={{title: 'artificial intelligence Chat',headerTitleAlign: 'center',}}/> */}
     </Stack>
   );
 }
