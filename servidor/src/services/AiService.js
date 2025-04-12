@@ -494,7 +494,7 @@ function parseAICommands(response, availableProducts) {
     logAI('Comando para mostrar carrinho detectado');
     
     return JSON.stringify({
-      text: messageText,
+      text: "OK", // Simplificando a resposta para apenas "OK"
       action: 'show_cart'
     });
   }
