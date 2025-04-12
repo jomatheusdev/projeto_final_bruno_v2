@@ -1,14 +1,19 @@
 import { DataTypes } from 'sequelize';
-import sequelize from '../config/db.js'; // o arquivo onde você conecta no banco
+import sequelize from '../config/db.js';
 
 const Product = sequelize.define('Product', {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
   name: {
     type: DataTypes.STRING,
     allowNull: false,
     unique: true,
   },
   price: {
-    type: DataTypes.FLOAT, // ou DECIMAL se quiser mais precisão
+    type: DataTypes.FLOAT,
     allowNull: false,
   },
   description: {
@@ -19,14 +24,18 @@ const Product = sequelize.define('Product', {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
-  expireDate: {
+  expire_date: {
     type: DataTypes.DATE,
-    allowNull: false,
+    allowNull: true,  // Permitir nulo para produtos que não expiram
   },
+  imageUrl: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  }
 }, {
-  tableName: 'products',        
-  timestamps: true,             
-  underscored: true,            
+  tableName: 'products',
+  timestamps: true,
+  underscored: true,
 });
 
 export default Product;

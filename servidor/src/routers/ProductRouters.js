@@ -4,10 +4,15 @@ import authMiddleware from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
+// Rota pública para listar produtos (acessível sem autenticação)
+router.route('/public/products')
+  .get(productController.findALL);
+
+// Rotas protegidas que requerem autenticação
 router.route('/product')
-  .get(authMiddleware, productController.findALL);  // Corrigido para não usar callback anônima
+  .get(authMiddleware, productController.findALL);
 
 router.route('/product/:id')
-  .get(authMiddleware, productController.findOne);  // Corrigido para não usar callback anônima
+  .get(authMiddleware, productController.findOne);
 
 export default router;

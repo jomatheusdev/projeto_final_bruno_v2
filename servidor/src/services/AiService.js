@@ -1,4 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { AI_MODELS, AI_CONFIG, GENERATION_CONFIG, logAI, isValidApiKey } from '../config/aiConfig.js';
+import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isAddToCartCommand } from '../config/prompts.js';
+import ProductSearchService from './ProductSearchService.js';
 
 // Mapa de conexões de usuários
 const connections = new Map();
@@ -11,20 +14,19 @@ const processedMessages = new Set();
 let genAI;
 let geminiModel;
 let isGeminiAvailable = false;
-
-// Modelos para tentar em ordem de preferência
-const MODELS_TO_TRY = [
-  'gemini-1.5-flash',
-  'gemini-1.0-pro',
-  'gemini-pro',
-  'gemini-1.5-pro'
-];
+let currentModelName = 'unknown';
 
 // Inicializa o modelo Gemini
 const initializeGemini = async () => {
   try {
+    // Validação da API key
     if (!process.env.GEMINI_API_KEY) {
-      console.warn('GEMINI_API_KEY não definida. O assistente AI não funcionará corretamente.');
+      logAI('GEMINI_API_KEY não definida no arquivo .env');
+      return false;
+    }
+    
+    if (!isValidApiKey(process.env.GEMINI_API_KEY)) {
+      logAI('GEMINI_API_KEY possui formato inválido ou é um placeholder');
       return false;
     }
     
@@ -33,35 +35,43 @@ const initializeGemini = async () => {
     // Tenta cada modelo em ordem até encontrar um que funcione
     let modelWorking = false;
     
-    for (const modelName of MODELS_TO_TRY) {
+    for (const modelName of AI_MODELS) {
       try {
-        console.log(`Tentando inicializar modelo: ${modelName}`);
-        geminiModel = genAI.getGenerativeModel({ model: modelName });
+        logAI(`Tentando inicializar modelo: ${modelName}`);
+        geminiModel = genAI.getGenerativeModel({ 
+          model: modelName,
+          generationConfig: {
+            temperature: parseFloat(process.env.AI_TEMPERATURE || GENERATION_CONFIG.temperature),
+            topP: GENERATION_CONFIG.topP,
+            topK: GENERATION_CONFIG.topK,
+          }
+        });
         
         // Testa se o modelo realmente funciona
-        const result = await geminiModel.generateContent("Teste simples de funcionamento");
+        const result = await geminiModel.generateContent(TEST_PROMPT);
         const responseText = result.response.text();
-        console.log(`Modelo ${modelName} funcionando! Resposta: "${responseText.substring(0, 20)}..."`);
+        logAI(`Modelo ${modelName} funcionando! Resposta: "${responseText.substring(0, 20)}..."`);
         
         // Se chegou aqui, o modelo funciona
         modelWorking = true;
+        currentModelName = modelName;
         break;
       } catch (modelError) {
-        console.error(`Erro ao testar modelo ${modelName}:`, modelError.message);
+        logAI(`Erro ao testar modelo ${modelName}`, modelError);
       }
     }
     
     if (!modelWorking) {
-      console.error('Nenhum modelo disponível funcionou');
+      logAI('Nenhum modelo disponível funcionou');
       isGeminiAvailable = false;
       return false;
     }
     
-    console.log(`Modelo Gemini inicializado com sucesso: ${geminiModel._modelName || 'desconhecido'}`);
+    logAI(`Modelo Gemini inicializado com sucesso: ${currentModelName}`);
     isGeminiAvailable = true;
     return true;
   } catch (error) {
-    console.error('Erro ao inicializar modelo Gemini:', error);
+    logAI('Erro ao inicializar modelo Gemini', error);
     isGeminiAvailable = false;
     return false;
   }
@@ -93,8 +103,9 @@ const aiService = {
     ws.send(JSON.stringify({
       type: 'api_status',
       available: isGeminiAvailable,
+      model: currentModelName,
       message: isGeminiAvailable ? 
-        `API Gemini conectada e funcionando com modelo: ${geminiModel?._modelName || 'desconhecido'}` : 
+        `API Gemini conectada e funcionando com modelo: ${currentModelName}` : 
         'API Gemini não está disponível. O assistente responderá com mensagens padrão.'
     }));
     
@@ -111,17 +122,17 @@ const aiService = {
           // Verifica se a mensagem já foi processada (evita duplicação)
           const messageFingerprint = `${sessionId}-${data.text}-${Date.now().toString().substring(0, 10)}`;
           if (processedMessages.has(messageFingerprint)) {
-            console.log('Mensagem duplicada detectada e ignorada');
+            logAI('Mensagem duplicada detectada e ignorada');
             return;
           }
           
           // Adiciona ao cache para evitar duplicação
           processedMessages.add(messageFingerprint);
           
-          // Limpa mensagens antigas do cache a cada 60 segundos
+          // Limpa mensagens antigas do cache periodicamente
           setTimeout(() => {
             processedMessages.delete(messageFingerprint);
-          }, 60000);
+          }, AI_CONFIG.cacheClearInterval);
           
           const userMessage = {
             id: messageId,
@@ -157,14 +168,14 @@ const aiService = {
           }
         }
       } catch (error) {
-        console.error('Erro ao processar mensagem WebSocket:', error);
+        logAI('Erro ao processar mensagem WebSocket', error);
       }
     });
     
     // Lógica para quando a conexão for fechada
     ws.on('close', () => {
       connections.delete(userId);
-      console.log(`Conexão websocket fechada: ${userId}`);
+      logAI(`Conexão websocket fechada: ${userId}`);
     });
   },
   
@@ -184,59 +195,103 @@ const aiService = {
       
       // Se a IA não está disponível, tenta inicializar novamente
       if (!isGeminiAvailable) {
-        console.log("API não disponível, tentando inicializar novamente...");
+        logAI("API não disponível, tentando inicializar novamente...");
         if (!await initializeGemini()) {
-          console.log("Falhou ao reinicializar, usando resposta de fallback");
+          logAI("Falhou ao reinicializar, usando resposta de fallback");
           throw new Error('API Gemini não está disponível');
         }
       }
       
-      // Obtém o histórico da conversa (últimas 6 mensagens)
+      // Obtém o histórico da conversa
       const history = sessionMessages.get(sessionId) || [];
-      const recentMessages = history.slice(-6).filter(msg => msg.userId !== 'ai-assistant');
-      const conversationContext = recentMessages.map(msg => msg.text).join('\n');
+      const recentMessages = history
+        .slice(-AI_CONFIG.contextMessageLimit)
+        .filter(msg => msg.userId !== 'ai-assistant');
+      
+      const conversationContext = recentMessages
+        .map(msg => `${msg.userName}: ${msg.text}`)
+        .join('\n');
+      
+      // Verificar se é uma intenção de adicionar ao carrinho
+      const isCartCommand = isAddToCartCommand(userMessage.text);
+      if (isCartCommand) {
+        logAI('Detectado comando de adicionar ao carrinho');
+      }
+      
+      // Busca produtos relacionados à pergunta do usuário
+      let relatedProducts = await ProductSearchService.findRelatedProducts(userMessage.text);
+      
+      // Se não encontrou produtos relacionados, busca alguns produtos aleatórios para sugerir
+      if (relatedProducts.length === 0) {
+        logAI("Nenhum produto relacionado encontrado, buscando produtos genéricos");
+        relatedProducts = await ProductSearchService.findAllProducts(5);
+      }
+      
+      // Para debugging
+      if (relatedProducts.length > 0) {
+        logAI(`Produtos disponíveis para sugestão: ${relatedProducts.map(p => p.name).join(', ')}`);
+      } else {
+        logAI("ALERTA: Nenhum produto disponível para oferecer ao usuário!");
+      }
       
       try {
         if (isGeminiAvailable && geminiModel) {
-          // Contexto para a IA - versão simplificada para maior compatibilidade
-          const prompt = `Como assistente de compras para supermercado, responda à seguinte pergunta do cliente de forma útil e amigável: ${userMessage.text}`;
+          // Cria o prompt para a IA usando o template e incluindo os produtos
+          const prompt = createProductAssistantPrompt(
+            userMessage.text, 
+            conversationContext,
+            relatedProducts
+          );
           
-          console.log('Enviando prompt para o modelo Gemini...');
+          logAI('Enviando prompt para o modelo Gemini com informações de produtos');
           
           // Gera a resposta da IA com timeout
           const result = await Promise.race([
             geminiModel.generateContent(prompt),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Tempo esgotado para resposta da API')), 15000)
+              setTimeout(() => reject(new Error('Tempo esgotado para resposta da API')), 
+              AI_CONFIG.responseTimeout)
             )
           ]);
           
-          console.log('Resposta recebida do modelo Gemini');
+          logAI('Resposta recebida do modelo Gemini');
           const response = result.response;
           aiResponse = response.text();
+          
+          // Analisa a resposta para comandos de carrinho
+          const processedResponse = parseCartCommands(aiResponse, relatedProducts);
+          aiResponse = processedResponse;
         } else {
           throw new Error('Modelo Gemini não disponível');
         }
       } catch (apiError) {
-        console.error('Erro ao chamar API Gemini:', apiError);
+        logAI('Erro ao chamar API Gemini', apiError);
         
-        // Respostas estáticas de fallback quando a API falha
-        const fallbackResponses = [
-          "Posso ajudá-lo a encontrar produtos no supermercado. O que você está procurando?",
-          "Desculpe, estou com limitações técnicas no momento. Posso tentar ajudar com informações básicas de produtos.",
-          "Como assistente de compras, sugiro verificar as promoções da semana em nosso aplicativo.",
-          "Obrigado por sua pergunta. Gostaria de saber mais sobre algum produto específico?",
-          "Estamos com ofertas especiais em produtos de limpeza e alimentos não-perecíveis esta semana."
-        ];
+        // Resposta personalizada com produtos encontrados
+        if (relatedProducts.length > 0) {
+          const productList = relatedProducts
+            .map(p => `${p.name}: R$ ${p.price.toFixed(2)}`)
+            .join(', ');
+          
+          aiResponse = `Encontrei estes produtos que podem te interessar: ${productList}. Posso ajudar com mais informações sobre algum deles?`;
+        } else {
+          // Respostas estáticas de fallback quando a API falha
+          aiResponse = FALLBACK_RESPONSES[Math.floor(Math.random() * FALLBACK_RESPONSES.length)];
+        }
         
-        aiResponse = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+        // Tenta reiniciar o modelo em segundo plano
+        setTimeout(() => {
+          initializeGemini().then(success => {
+            logAI(`Tentativa de reinicialização do modelo: ${success ? 'sucesso' : 'falha'}`);
+          });
+        }, AI_CONFIG.retry.initialDelay);
       }
       
       // Cria objeto de mensagem para a resposta da IA
       const aiMessage = {
         id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         userId: 'ai-assistant',
-        userName: 'Assistente IA',
+        userName: AI_CONFIG.assistantName,
         text: aiResponse,
         timestamp: new Date().toISOString()
       };
@@ -251,13 +306,13 @@ const aiService = {
       });
       
     } catch (error) {
-      console.error('Erro ao processar mensagem com IA:', error);
+      logAI('Erro ao processar mensagem com IA', error);
       
       // Envia mensagem de fallback como resposta
       const errorMessage = {
         id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         userId: 'ai-assistant',
-        userName: 'Assistente IA',
+        userName: AI_CONFIG.assistantName,
         text: 'Como posso ajudá-lo com suas compras hoje?',
         timestamp: new Date().toISOString()
       };
@@ -272,5 +327,63 @@ const aiService = {
     }
   }
 };
+
+// Função para processar comandos de carrinho na resposta da IA
+function parseCartCommands(response, availableProducts) {
+  // Verifica se a resposta contém comando de adicionar ao carrinho
+  const cartCommandRegex = /\[ADICIONAR_AO_CARRINHO\]([0-9,]+)\s+(.*)/i;
+  const match = response.match(cartCommandRegex);
+  
+  if (match) {
+    logAI(`Comando de carrinho detectado! Texto original: "${response}"`);
+    
+    const productIds = match[1].split(',').map(id => id.trim());
+    const messageText = match[2];
+    
+    logAI(`IDs de produtos extraídos: ${productIds.join(', ')}`);
+    
+    if (productIds.length === 0 || productIds[0] === '') {
+      logAI('Comando de carrinho detectado, mas sem IDs de produto válidos');
+      return response;
+    }
+    
+    // Preparar informações dos produtos para enviar ao cliente
+    const productsToAdd = [];
+    
+    for (const id of productIds) {
+      // Busca pelo produto correspondente
+      const product = availableProducts.find(p => p.id.toString() === id);
+      
+      if (product) {
+        logAI(`Produto encontrado para ID ${id}: ${product.name}`);
+        productsToAdd.push({
+          id: product.id,
+          name: product.name,
+          price: product.price
+        });
+      } else {
+        logAI(`ERRO: Produto com ID ${id} não encontrado na lista de ${availableProducts.length} produtos disponíveis`);
+        logAI(`IDs disponíveis: ${availableProducts.map(p => p.id).join(', ')}`);
+      }
+    }
+    
+    if (productsToAdd.length === 0) {
+      logAI('Nenhum produto válido para adicionar ao carrinho');
+      return response; // Retorna a resposta original se não encontrou produtos
+    }
+    
+    // Log dos produtos que serão adicionados
+    logAI(`Adicionando ao carrinho ${productsToAdd.length} produto(s): ${productsToAdd.map(p => p.name).join(', ')}`);
+    
+    // Reformatar a mensagem para incluir metadados de produto
+    return JSON.stringify({
+      text: messageText,
+      action: 'add_to_cart',
+      products: productsToAdd
+    });
+  }
+  
+  return response;
+}
 
 export default aiService;

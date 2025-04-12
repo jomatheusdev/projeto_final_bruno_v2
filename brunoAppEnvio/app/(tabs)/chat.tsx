@@ -8,10 +8,13 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  ToastAndroid,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { useCart } from '../../context/CartContext';
 
 interface Message {
   id: string;
@@ -19,9 +22,12 @@ interface Message {
   userName: string;
   text: string;
   timestamp: string;
+  action?: string;
+  products?: any[];
 }
 
 const Chat = () => {
+  const { addProductsFromAI, addToCart } = useCart();
   const [userName, setUserName] = useState('Usuário');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -136,7 +142,13 @@ const Chat = () => {
             }
           } 
           else if (data.type === 'message') {
-            setMessages(prev => [...prev, data.message]);
+            // Debug
+            console.log('Mensagem recebida:', JSON.stringify(data.message));
+            
+            // Processa a mensagem antes de adicioná-la
+            const processedMessage = processAIMessage(data.message);
+            setMessages(prev => [...prev, processedMessage]);
+            
             setTimeout(() => {
               if (flatListRef.current) {
                 flatListRef.current.scrollToEnd({ animated: true });
@@ -144,7 +156,9 @@ const Chat = () => {
             }, 100);
           } 
           else if (data.type === 'history') {
-            setMessages(data.messages);
+            // Processa mensagens do histórico
+            const processedMessages = data.messages.map(processAIMessage);
+            setMessages(processedMessages);
           }
           else if (data.type === 'api_status') {
             setIsApiAvailable(data.available);
@@ -311,6 +325,57 @@ const Chat = () => {
     }
     
     return decodeURIComponent(escape(output));
+  };
+
+  // Função para mostrar toast/alert
+  const showToast = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } else {
+      Alert.alert('Notificação', message);
+    }
+  };
+  
+  // Função para processar mensagens especiais da IA
+  const processAIMessage = (message: any) => {
+    try {
+      // Verifica se a mensagem é um JSON com comandos especiais
+      if (typeof message.text === 'string' && message.text.startsWith('{')) {
+        console.log('Detectada possível mensagem JSON da IA:', message.text);
+        
+        try {
+          const data = JSON.parse(message.text);
+          
+          if (data.action === 'add_to_cart' && Array.isArray(data.products)) {
+            console.log('Comando de adição ao carrinho detectado!');
+            
+            if (data.products.length > 0) {
+              console.log('Produtos para adicionar:', JSON.stringify(data.products));
+              
+              // Adiciona os produtos ao carrinho
+              addProductsFromAI(data.products);
+              
+              const productNames = data.products.map((p: any) => p.name).join(', ');
+              showToast(`Adicionado ao carrinho: ${productNames}`);
+              
+              // Substitui o JSON por uma mensagem legível
+              return {
+                ...message,
+                text: data.text || `Adicionei ${productNames} ao seu carrinho!`
+              };
+            } else {
+              console.warn('Comando de carrinho sem produtos');
+            }
+          }
+        } catch (jsonError) {
+          console.error('Falha ao processar JSON da mensagem:', jsonError);
+        }
+      }
+      return message;
+    } catch (e) {
+      console.log('Erro ao processar mensagem:', e);
+      return message;
+    }
   };
 
   if (isLoading) {

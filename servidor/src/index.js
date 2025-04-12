@@ -9,6 +9,7 @@ import productRouter from './routers/ProductRouters.js';
 import paymentRouter from './routers/PaymentRouter.js';
 import sequelize from './config/db.js';
 import aiService from './services/AiService.js';
+import DatabaseSeedService from './services/DatabaseSeedService.js';
 
 const app = express();
 
@@ -17,7 +18,7 @@ app.use(cors());
 
 app.use('/api', userRouter);
 app.use('/api', productRouter);
-app.use('/api', paymentRouter); // Adicionando rota de pagamentos
+app.use('/api', paymentRouter);
 
 // Cria servidor HTTP a partir do app Express
 const server = http.createServer(app);
@@ -54,9 +55,16 @@ wss.on('connection', (ws, req) => {
   }));
 });
 
-sequelize.sync()
-  .then(() => {
+// Inicializa o banco de dados e popula com dados iniciais se necessário
+const startServer = async () => {
+  try {
+    // Sincroniza os modelos com o banco de dados
+    await sequelize.sync();
     console.log('Banco de dados sincronizado com Sequelize');
+    
+    // Executa o seed inicial do banco de dados
+    await DatabaseSeedService.seedDatabase();
+    
     const PORT = process.env.PORT;
     
     // Inicia o servidor HTTP (que inclui Express e WebSocket)
@@ -64,7 +72,10 @@ sequelize.sync()
       console.log(`Servidor rodando na porta http://localhost:${PORT}`);
       console.log(`WebSocket disponível em ws://localhost:${PORT}`);
     });
-  })
-  .catch((error) => {
-    console.error('Erro ao sincronizar com o banco de dados:', error);
-  });
+  } catch (error) {
+    console.error('Erro ao inicializar servidor:', error);
+  }
+};
+
+// Inicia o servidor
+startServer();
