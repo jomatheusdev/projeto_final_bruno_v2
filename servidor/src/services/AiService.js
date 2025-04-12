@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AI_MODELS, AI_CONFIG, GENERATION_CONFIG, logAI, isValidApiKey } from '../config/aiConfig.js';
-import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand, isCartCommand, isOrderHistoryQuery } from '../config/prompts.js';
+import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand, isCartCommand, isOrderHistoryQuery, isCompletedOrderQuery } from '../config/prompts.js';
 import ProductSearchService from './ProductSearchService.js';
 
 // Mapa de conexões de usuários
@@ -284,43 +284,40 @@ const aiService = {
         userMessage.userName = connection.userName;
       }
       
-      // Verificar se é uma intenção de listar produtos
-      const isListCommand = isListProductsCommand(userMessage.text);
-      if (isListCommand) {
-        logAI('Detectado comando de listar produtos');
-      }
-      
-      // Verificar se é uma intenção relacionada ao carrinho
-      const isCartRelated = isCartCommand(userMessage.text);
-      if (isCartRelated) {
-        logAI('Detectado comando relacionado ao carrinho');
-      }
-      
       // Verificar se é uma pergunta sobre pedidos/histórico de compras
       const isOrderQuery = isOrderHistoryQuery(userMessage.text);
+      const isCompletedOrder = isCompletedOrderQuery(userMessage.text);
+      
+      // Log para depuração
       if (isOrderQuery) {
-        logAI('Detectada consulta sobre histórico de pedidos');
-      }
-      
-      // Busca produtos relacionados à pergunta do usuário
-      let relatedProducts = await ProductSearchService.findRelatedProducts(userMessage.text);
-      
-      // Se não encontrou produtos relacionados, busca alguns produtos aleatórios para sugerir
-      if (relatedProducts.length === 0) {
-        logAI("Nenhum produto relacionado encontrado, buscando produtos genéricos");
-        relatedProducts = await ProductSearchService.findAllProducts(5);
+        logAI(`Detectada consulta sobre histórico de pedidos (completos: ${isCompletedOrder})`);
       }
       
       // Busca informações de pedidos do usuário se a pergunta for relacionada a compras
       let userOrderHistory = null;
       let purchaseStats = null;
+      let completedOrders = null;
+      
+      // Obter dados de pedidos primeiro se for uma consulta sobre pedidos
       if (isOrderQuery && userMessage.userId !== 'system') {
         try {
           // Tentamos buscar o histórico de compras do usuário
           const userId = userMessage.userId || 1; // Usando 1 como fallback para testes
           
           logAI(`Buscando histórico de pedidos para usuário: ${userId}`);
-          userOrderHistory = await ProductSearchService.getUserOrderHistory(userId);
+          
+          // Se é especificamente sobre pedidos finalizados, usamos a função específica
+          if (isCompletedOrder) {
+            logAI(`Buscando pedidos finalizados para usuário: ${userId}`);
+            completedOrders = await ProductSearchService.getCompletedOrders(userId);
+            if (completedOrders && completedOrders.success) {
+              userOrderHistory = completedOrders; // Usa os pedidos finalizados para exibição
+              logAI(`Encontrados ${completedOrders.orders.length} pedidos finalizados`);
+            }
+          } else {
+            // Caso contrário, busca o histórico normal
+            userOrderHistory = await ProductSearchService.getUserOrderHistory(userId);
+          }
           
           // Se conseguiu obter o histórico, também busca estatísticas de compra
           if (userOrderHistory && userOrderHistory.success) {
@@ -332,19 +329,66 @@ const aiService = {
         }
       }
       
+      // Se for uma consulta de pedidos e tivermos dados, damos prioridade a isso
+      // Só buscamos produtos em outras situações ou como fallback
+      let relatedProducts = [];
+      
+      // Verificar se é uma intenção de listar produtos (apenas se não for uma consulta de pedidos)
+      const isListCommand = isListProductsCommand(userMessage.text);
+      
+      if (!isOrderQuery || !userOrderHistory || !userOrderHistory.success) {
+        // Verificamos se é uma intenção de listar produtos apenas se não for sobre pedidos
+        // ou se não temos dados de pedidos
+        if (isListCommand) {
+          logAI('Detectado comando de listar produtos');
+        }
+        
+        // Verificar se é uma intenção relacionada ao carrinho
+        const isCartRelated = isCartCommand(userMessage.text);
+        if (isCartRelated) {
+          logAI('Detectado comando relacionado ao carrinho');
+        }
+        
+        // Busca produtos relacionados à pergunta do usuário
+        relatedProducts = await ProductSearchService.findRelatedProducts(userMessage.text);
+        
+        // Se não encontrou produtos relacionados, busca alguns produtos aleatórios para sugerir
+        if (relatedProducts.length === 0) {
+          logAI("Nenhum produto relacionado encontrado, buscando produtos genéricos");
+          relatedProducts = await ProductSearchService.findAllProducts(5);
+        }
+      }
+      
       try {
         if (isGeminiAvailable && geminiModel) {
-          // Cria o prompt para a IA usando o template e incluindo os produtos e informações de pedidos
-          const prompt = createProductAssistantPrompt(
-            userMessage.text, 
-            conversationContext,
-            relatedProducts,
-            [], // Carrinho vazio por enquanto
-            userOrderHistory?.orders || [],
-            purchaseStats?.stats || null
-          );
+          // Cria um prompt diferente dependendo do contexto da pergunta
+          let prompt;
           
-          logAI('Enviando prompt para o modelo Gemini com informações de produtos e pedidos');
+          if (isCompletedOrder && userOrderHistory && userOrderHistory.success) {
+            // Para consultas específicas sobre pedidos concluídos, criamos um prompt que
+            // enfatiza os dados de pedidos
+            prompt = createProductAssistantPrompt(
+              `Por favor, me mostre os detalhes dos meus pedidos finalizados. ${userMessage.text}`, 
+              conversationContext,
+              [], // Enviamos lista vazia de produtos para evitar distração
+              [], // Carrinho vazio 
+              userOrderHistory.orders || [],
+              purchaseStats?.stats || null
+            );
+            logAI('Criando prompt com foco em pedidos finalizados');
+          } else {
+            // Prompt normal para outras perguntas
+            prompt = createProductAssistantPrompt(
+              userMessage.text, 
+              conversationContext,
+              relatedProducts,
+              [], // Carrinho vazio por enquanto
+              userOrderHistory?.orders || [],
+              purchaseStats?.stats || null
+            );
+          }
+          
+          logAI('Enviando prompt para o modelo Gemini');
           
           // Gera a resposta da IA com timeout
           const result = await Promise.race([
@@ -369,9 +413,32 @@ const aiService = {
         logAI('Erro ao chamar API Gemini', apiError);
         
         // Se a pergunta era sobre histórico de pedidos e temos dados, gera uma resposta manual
-        if (isOrderQuery && userOrderHistory && userOrderHistory.success && userOrderHistory.orders.length > 0) {
-          const lastOrder = userOrderHistory.orders[0];
-          aiResponse = `De acordo com seu histórico, sua última compra foi feita em ${lastOrder.date} no valor total de R$ ${lastOrder.total.toFixed(2)} com ${lastOrder.totalItems} itens. Quer mais detalhes sobre esta compra?`;
+        if (isOrderQuery && userOrderHistory && userOrderHistory.success) {
+          if (isCompletedOrder && completedOrders && completedOrders.orders.length > 0) {
+            // Resposta específica para pedidos finalizados
+            const ordersCount = completedOrders.orders.length;
+            const recentOrders = completedOrders.orders.slice(0, 3); // Mostra até 3 pedidos mais recentes
+            
+            aiResponse = `Você tem ${ordersCount} pedidos finalizados. Aqui estão os mais recentes:\n\n`;
+            
+            recentOrders.forEach(order => {
+              aiResponse += `- Pedido #${order.orderId} (${order.date}): R$ ${order.total.toFixed(2)} - ${order.totalItems} itens\n`;
+              
+              // Adicionamos alguns produtos do pedido para detalhes adicionais
+              if (order.items && order.items.length > 0) {
+                const sampleItems = order.items.slice(0, 3); // Limitamos a 3 itens para não ficar muito extenso
+                aiResponse += `   Inclui: ${sampleItems.map(item => `${item.quantity}x ${item.productName}`).join(', ')}${order.items.length > 3 ? '...' : ''}\n`;
+              }
+            });
+            
+            aiResponse += `\nGostaria de ver detalhes sobre algum pedido específico?`;
+          } else if (userOrderHistory.orders.length > 0) {
+            // Resposta para histórico geral de pedidos
+            const lastOrder = userOrderHistory.orders[0];
+            aiResponse = `De acordo com seu histórico, sua última compra foi feita em ${lastOrder.date} no valor total de R$ ${lastOrder.total.toFixed(2)} com ${lastOrder.totalItems} itens. Quer mais detalhes sobre esta compra?`;
+          } else {
+            aiResponse = "Você ainda não possui pedidos realizados.";
+          }
         } 
         // Resposta personalizada com produtos encontrados
         else if (relatedProducts.length > 0) {

@@ -64,6 +64,10 @@ IMPORTANTE - FUNCIONALIDADE DE MANIPULAÇÃO DO CARRINHO (SIGA EXATAMENTE):
 
 // Template de prompt para responder a perguntas com informações de produtos
 export const createProductAssistantPrompt = (userQuestion, conversationContext = '', availableProducts = [], cartItems = [], orderHistory = [], purchaseStats = null) => {
+  // Verificar se a pergunta é sobre histórico de pedidos para enfatizar isso no prompt
+  const isAboutOrderHistory = isOrderHistoryQuery(userQuestion);
+  const isSpecificallyAboutCompletedOrders = isCompletedOrderQuery(userQuestion);
+  
   // Se há produtos disponíveis, inclua-os no contexto
   let productContext = '';
   
@@ -84,6 +88,7 @@ REGRAS CRÍTICAS:
 7. Suas respostas sobre os produtos devem ser INFORMATIVAS e EDUCATIVAS, explique características do produto quando relevante.
 8. Quando o cliente perguntar sobre quantidade em estoque (ex: "quantas unidades tem?", "quanto tem em estoque?"), 
    liste SEMPRE o nome de cada produto relevante seguido da quantidade exata disponível em estoque.
+9. MUITO IMPORTANTE: Se o cliente perguntar sobre "pedidos", "compras" ou "histórico de pedidos", NÃO RESPONDA COM LISTA DE PRODUTOS.
 `;
   } else {
     productContext = `
@@ -124,13 +129,13 @@ COMANDOS DO CARRINHO:
   let orderContext = '';
   if (orderHistory && orderHistory.length > 0) {
     orderContext = `
-HISTÓRICO DE COMPRAS DO CLIENTE:
+HISTÓRICO DE COMPRAS DO CLIENTE (MUITO IMPORTANTE!):
 
 ${orderHistory.map((order, index) => {
   return `PEDIDO #${order.orderId} - ${order.date}:
   - Valor total: R$ ${order.total.toFixed(2)}
-  - Método de pagamento: ${order.paymentMethod}
-  - Status: ${order.status}
+  - Método de pagamento: ${order.paymentMethod || 'Não especificado'}
+  - Status: ${order.status || 'Finalizado'}
   - Total de itens: ${order.totalItems} unidades de ${order.uniqueProducts} produtos diferentes
   
   Produtos comprados:
@@ -139,6 +144,10 @@ ${orderHistory.map((order, index) => {
   ).join('\n')}
   `;
 }).join('\n')}`;
+  } else {
+    orderContext = `
+HISTÓRICO DE COMPRAS DO CLIENTE: O cliente não possui pedidos anteriores registrados.
+`;
   }
 
   // Adicionar estatísticas de compra, se disponíveis
@@ -162,16 +171,35 @@ ${purchaseStats.mostPurchasedProducts?.map(product =>
   let orderInstructions = '';
   if ((orderHistory && orderHistory.length > 0) || purchaseStats) {
     orderInstructions = `
-INSTRUÇÕES PARA PERGUNTAS SOBRE COMPRAS ANTERIORES:
-1. Se o cliente perguntar sobre seu histórico de compras ou pedidos anteriores, forneça detalhes usando as informações acima.
-2. Se perguntar "o que comprei recentemente", resuma os itens do pedido mais recente.
+INSTRUÇÕES PARA PERGUNTAS SOBRE COMPRAS ANTERIORES (EXTREMAMENTE IMPORTANTE):
+1. Se o cliente perguntar sobre seu histórico de compras, pedidos anteriores ou pedidos finalizados, PRIORIZE este assunto e IGNORE qualquer contexto sobre produtos disponíveis.
+2. Se perguntar "o que comprei recentemente" ou "liste os pedidos finalizados", enumere os pedidos acima com seus detalhes.
 3. Se perguntar sobre quanto gastou, mencione o valor do último pedido e o total gasto se disponível.
 4. Se perguntar sobre produtos específicos que já comprou antes, verifique no histórico antes de responder.
 5. SEMPRE use os dados exatos conforme listados no histórico de compras, não invente valores!
+6. NUNCA responda a uma pergunta sobre pedidos com uma lista de produtos disponíveis para compra.
+7. QUANDO A PERGUNTA FOR SOBRE "PEDIDOS FINALIZADOS" OU "LISTA DE COMPRAS", SEMPRE RESPONDA COM INFORMAÇÕES DOS PEDIDOS, NÃO DE PRODUTOS.
+`;
+  }
+
+  // Criar um contexto prioritário se for sobre pedidos finalizados
+  let priorityContext = '';
+  if (isSpecificallyAboutCompletedOrders && orderHistory && orderHistory.length > 0) {
+    priorityContext = `
+ATENÇÃO! O CLIENTE ESTÁ PERGUNTANDO ESPECIFICAMENTE SOBRE SEUS PEDIDOS FINALIZADOS!
+VOCÊ DEVE RESPONDER APENAS COM INFORMAÇÕES SOBRE OS PEDIDOS NO HISTÓRICO DE COMPRAS.
+NÃO MENCIONE PRODUTOS DISPONÍVEIS PARA VENDA.
+LISTE OS PEDIDOS FINALIZADOS COM SEUS DETALHES.
+`;
+  } else if (isAboutOrderHistory && orderHistory && orderHistory.length > 0) {
+    priorityContext = `
+ATENÇÃO! O CLIENTE ESTÁ PERGUNTANDO SOBRE SEU HISTÓRICO DE COMPRAS!
+VOCÊ DEVE PRIORIZAR INFORMAÇÕES SOBRE OS PEDIDOS NO HISTÓRICO DE COMPRAS.
 `;
   }
 
   return `${ASSISTANT_SCOPE}
+${priorityContext}
 ${conversationContext ? `Contexto da conversa anterior:
 ${conversationContext}
 
@@ -187,8 +215,8 @@ ${orderInstructions}
 
 A pergunta atual do cliente é: "${userQuestion}"
 
-Responda de forma útil, amigável e INFORMATIVA, SEMPRE mencionando os produtos disponíveis quando o cliente perguntar sobre disponibilidade.
-Se o cliente estiver perguntando sobre seu histórico de compras, forneça informações detalhadas dos pedidos anteriores quando disponíveis.
+Responda de forma útil, amigável e INFORMATIVA.
+${isSpecificallyAboutCompletedOrders ? 'RESPONDA APENAS COM INFORMAÇÕES SOBRE OS PEDIDOS FINALIZADOS DO CLIENTE.' : ''}
 LEMBRE-SE: 
 - Se o cliente quiser ver produtos específicos ou todos os produtos, use exatamente o formato [LISTAR_PRODUTOS]ID1,ID2,ID3...
 - Se o cliente pedir para adicionar um produto ao carrinho, use exatamente o formato [ADICIONAR_AO_CARRINHO]ID
@@ -306,10 +334,32 @@ export const isOrderHistoryQuery = (userQuestion) => {
     /(?:já|antes)\s+(?:comprei|pedi|adquiri)/i,
     /(?:mostre|mostre-me|exiba|liste)\s+(?:meu[s]?\s+pedido[s]?|minha[s]?\s+compra[s]?)/i,
     /quanto\s+(?:gastei|já\s+gastei|tenho\s+gastado)/i,
-    /produtos?\s+(?:que\s+)?(?:mais\s+)?compro/i
+    /produtos?\s+(?:que\s+)?(?:mais\s+)?compro/i,
+    // Novos padrões específicos para pedidos/compras finalizadas
+    /(?:pedido[s]?|compra[s]?)\s+(?:finalizado[s]?|concluído[s]?|feito[s]?|realizado[s]?|completo[s]?)/i,
+    /(?:finalizado[s]?|concluído[s]?|feito[s]?|realizado[s]?|completo[s]?)\s+(?:pedido[s]?|compra[s]?)/i,
+    /(?:lista|listagem|histórico)\s+(?:de|dos)\s+(?:pedido[s]?|compra[s]?)/i,
+    /(?:liste|mostre|exiba)\s+(?:os|as|todos os|todas as)?\s+(?:pedido[s]?|compra[s]?)\s+(?:finalizado[s]?|concluído[s]?|anterior[es]?)/i,
+    /minhas?\s+(?:compras?|pedidos?)\s+(?:anteriores?|passados?|realizados?)/i
   ];
   
   return orderHistoryPatterns.some(pattern => pattern.test(userQuestion));
+};
+
+// Nova função específica para detectar consultas sobre pedidos finalizados especificamente
+export const isCompletedOrderQuery = (userQuestion) => {
+  const completedOrderPatterns = [
+    /(?:pedido[s]?|compra[s]?)\s+(?:finalizado[s]?|concluído[s]?|completo[s]?)/i,
+    /(?:finalizado[s]?|concluído[s]?|completo[s]?)\s+(?:pedido[s]?|compra[s]?)/i,
+    /(?:liste|mostre|exiba|veja)\s+(?:os|as)?\s+(?:pedido[s]?|compra[s]?)\s+(?:finalizado[s]?|concluído[s]?)/i,
+    /(?:pedidos finalizados|compras finalizadas|pedidos concluídos|compras concluídas)/i,
+    /(?:histórico completo|histórico total|tudo o que comprei|todas as compras)/i,
+    /(?:todos os|todas as)\s+(?:pedidos|compras)/i,
+    /(?:quais|quais são)\s+(?:os|as|meus|minhas)\s+(?:pedidos|compras)/i,
+    /(?:mostre|liste|exiba)\s+(?:todos|todas)\s+(?:os|as)\s+(?:pedidos|compras)/i
+  ];
+  
+  return completedOrderPatterns.some(pattern => pattern.test(userQuestion));
 };
 
 // Extrai o nome do produto a ser adicionado/removido do carrinho

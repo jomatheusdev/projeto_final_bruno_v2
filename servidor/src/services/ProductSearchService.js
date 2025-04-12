@@ -427,32 +427,134 @@ const ProductSearchService = {
 
         const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
         const uniqueProducts = items.length;
+        const totalValue = parseFloat(order.total);
 
         return {
           orderId: order.id,
           date: formattedDate,
           timestamp: order.createdAt,
-          total: parseFloat(order.total),
+          total: totalValue,
+          formattedTotal: `R$ ${totalValue.toFixed(2)}`,
           paymentMethod: order.paymentMethod,
           status: order.status,
+          statusFormatado: order.status === 'completed' ? 'Finalizado' : order.status,
           items: items,
           totalItems: totalItems,
-          uniqueProducts: uniqueProducts
+          uniqueProducts: uniqueProducts,
+          resumo: `Pedido #${order.id} - ${formattedDate} - ${totalItems} itens - R$ ${totalValue.toFixed(2)}`
         };
       });
+
+      // Adiciona informações consolidadas úteis para a IA
+      const totalGasto = formattedOrders.reduce((sum, order) => sum + order.total, 0);
+      const totalPedidos = formattedOrders.length;
+      const mediaGasto = totalGasto / totalPedidos;
 
       logAI(`Histórico completo de compras recuperado para usuário ${userId}: ${formattedOrders.length} pedidos`);
       
       return {
         success: true,
         message: `${formattedOrders.length} compras encontradas`,
-        orders: formattedOrders
+        orders: formattedOrders,
+        resumo: {
+          totalPedidos,
+          totalGasto: `R$ ${totalGasto.toFixed(2)}`,
+          mediaGasto: `R$ ${mediaGasto.toFixed(2)}`,
+          ultimaCompra: formattedOrders[0]?.resumo || 'Nenhuma compra'
+        }
       };
     } catch (error) {
       logAI(`Erro ao buscar histórico completo de compras para usuário ${userId}:`, error);
       return {
         success: false,
         message: 'Erro ao buscar histórico de compras'
+      };
+    }
+  },
+
+  // Função específica para listar pedidos finalizados
+  getCompletedOrders: async (userId) => {
+    try {
+      if (!userId) {
+        return { success: false, message: 'ID do usuário é obrigatório' };
+      }
+
+      // Busca especificamente os pedidos com status "completed"
+      const orders = await Order.findAll({
+        where: { 
+          userId: userId,
+          status: 'completed'  // Filtra por status completed
+        },
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            include: [{
+              model: Product,
+              attributes: ['name', 'price', 'imageUrl', 'description']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+
+      if (orders.length === 0) {
+        return { 
+          success: true, 
+          message: 'Nenhum pedido finalizado encontrado',
+          orders: []
+        };
+      }
+
+      // Formata os dados para facilitar a apresentação pela IA
+      const formattedOrders = orders.map(order => {
+        const formattedDate = new Date(order.createdAt).toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        const items = order.items.map(item => ({
+          productId: item.productId,
+          productName: item.Product?.name || 'Produto não encontrado',
+          quantity: item.quantity,
+          unitPrice: parseFloat(item.price),
+          total: parseFloat(item.price) * item.quantity
+        }));
+
+        const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+        const totalValue = parseFloat(order.total);
+
+        return {
+          orderId: order.id,
+          date: formattedDate,
+          timestamp: order.createdAt,
+          total: totalValue,
+          formattedTotal: `R$ ${totalValue.toFixed(2)}`,
+          paymentMethod: order.paymentMethod,
+          status: 'Finalizado', // Em português para exibição
+          items: items,
+          totalItems: totalItems,
+          uniqueProducts: items.length,
+          resumo: `Pedido #${order.id} - ${formattedDate} - ${totalItems} itens - R$ ${totalValue.toFixed(2)}`
+        };
+      });
+
+      logAI(`${formattedOrders.length} pedidos finalizados recuperados para usuário ${userId}`);
+      
+      return {
+        success: true,
+        message: `${formattedOrders.length} pedidos finalizados encontrados`,
+        orders: formattedOrders
+      };
+    } catch (error) {
+      logAI(`Erro ao buscar pedidos finalizados para usuário ${userId}:`, error);
+      return {
+        success: false,
+        message: 'Erro ao buscar pedidos finalizados',
+        error: error.message
       };
     }
   },
