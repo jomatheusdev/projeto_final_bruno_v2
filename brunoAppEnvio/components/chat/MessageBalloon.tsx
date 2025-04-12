@@ -51,7 +51,7 @@ const MessageBalloon = ({ message, currentUserId, onAddToCart }: BalloonProps) =
     <View style={[styles.bubbleWrapper, bubbleWrapper]}>
       <View style={[styles.balloon, balloonColor]}>
         <Text style={[styles.senderName, balloonTextColor]}>
-          {message.userName}
+          {isAi ? 'Assistente IA' : message.userName}
         </Text>
         <Text style={[styles.balloonText, balloonTextColor]}>
           {message.text}
@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     color: 'black',
   },
   senderName: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
     marginBottom: 4,
   },

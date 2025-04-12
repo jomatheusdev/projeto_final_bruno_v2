@@ -66,6 +66,7 @@ export const useAIChat = (addToCart: (product: Product) => void, removeFromCart:
             
             if (response.data && response.data.name) {
               setUserName(response.data.name);
+              console.log('Nome do usuário definido:', response.data.name);
             }
           } catch (fetchError) {
             console.error('Erro ao buscar dados do usuário:', fetchError);
@@ -76,6 +77,8 @@ export const useAIChat = (addToCart: (product: Product) => void, removeFromCart:
     } catch (error) {
       console.error('Erro ao recuperar dados do usuário:', error);
     } finally {
+      // Garantir que o nome do usuário seja usado na conexão
+      console.log('Conectando WebSocket com nome de usuário:', userName);
       connectWebSocket();
     }
   };
@@ -108,6 +111,8 @@ export const useAIChat = (addToCart: (product: Product) => void, removeFromCart:
     
     const newSessionId = Date.now().toString();
     setSessionId(newSessionId);
+    
+    console.log('Iniciando conexão WebSocket com nome:', userName);
     
     aiServiceRef.current = new AIService(userName, {
       onConnected: (userId, message) => {

@@ -33,6 +33,12 @@ export class AIService {
     this.sessionId = Date.now().toString();
   }
 
+  // Adicionando um método para atualizar o nome do usuário
+  public updateUserName(userName: string): void {
+    this.userName = userName;
+    console.log('Nome do usuário atualizado no serviço AI:', userName);
+  }
+
   public connect(): void {
     try {
       const socketUrl = `${this.serverUrl}?sessionId=${this.sessionId}`;
@@ -100,6 +106,8 @@ export class AIService {
     }
 
     try {
+      console.log('Enviando mensagem como:', this.userName); // Log para depuração
+      
       const messageData = {
         type: 'chat',
         userName: this.userName,
