@@ -42,12 +42,19 @@ const evaluateRelevance = (query, product) => {
 
 const ProductSearchService = {
   // Busca todos os produtos disponíveis (usado para fallback)
-  findAllProducts: async (limit = 10) => {
+  findAllProducts: async (limit = null) => {
     try {
-      const products = await Product.findAll({
-        where: { quantity: { [Op.gt]: 0 } }, // Apenas produtos com estoque
-        limit: limit
-      });
+      const options = {
+        where: { quantity: { [Op.gt]: 0 } } // Apenas produtos com estoque
+      };
+      
+      // Aplica limite apenas se especificado
+      if (limit) {
+        options.limit = limit;
+      }
+      
+      const products = await Product.findAll(options);
+      logAI(`Buscando todos os produtos${limit ? ' (limitado a ' + limit + ')' : ''}, encontrados: ${products.length}`);
       
       return products.map(p => p.get({ plain: true }));
     } catch (error) {
@@ -59,10 +66,20 @@ const ProductSearchService = {
   // Busca produtos relacionados a uma pergunta do usuário
   findRelatedProducts: async (userQuestion) => {
     try {
+      // Verifica se a pergunta pede todos os produtos disponíveis
+      const askingForAllProducts = /(?:quais|que|todos os|mostre os|liste os|ver|veja|ver todos|mostrar todos|mostrar|todos|todas as)?\s*(?:produtos|mercadorias|itens|opções)?\s*(?:disponíveis|cadastrados|temos|tem|há|existentes|em estoque|a venda|para comprar|que vocês vendem|que você vende|que temos|que tem)/i.test(userQuestion.toLowerCase());
+
+      if (askingForAllProducts) {
+        logAI('Usuário pediu para listar TODOS os produtos disponíveis');
+        return await ProductSearchService.findAllProducts(); // Sem limite para retornar todos
+      }
+      
       // Lista de palavras-chave comuns para procurar
       const commonKeywords = [
         'ovo', 'ovos', 'carne', 'frango', 'leite', 'arroz', 
-        'feijão', 'açúcar', 'café', 'pão', 'queijo'
+        'feijão', 'açúcar', 'café', 'pão', 'queijo', 'óleo',
+        'macarrão', 'sal', 'farinha', 'molho', 'biscoito',
+        'refrigerante', 'papel', 'sabonete', 'detergente'
       ];
       
       // Verifica se alguma palavra-chave aparece na pergunta
@@ -77,6 +94,13 @@ const ProductSearchService = {
       if (!productQuery && matchedKeywords.length === 0) {
         logAI('Sem termos específicos de busca, retornando produtos populares');
         return await ProductSearchService.findAllProducts(5);
+      }
+      
+      // Se parece uma pergunta sobre um produto específico (ex: "o que é arroz?")
+      const isSpecificProductQuestion = /(?:o que é|me fale sobre|informações sobre|detalhes sobre|me explique|como é|descreva)\s+([^?.,!;]+)/i.test(userQuestion.toLowerCase());
+      
+      if (isSpecificProductQuestion) {
+        logAI(`Detectada pergunta sobre produto específico: "${productQuery || matchedKeywords.join(', ')}"`);
       }
       
       logAI(`Buscando produtos relacionados a: "${productQuery || matchedKeywords.join(', ')}"`);
@@ -118,7 +142,7 @@ const ProductSearchService = {
           relevance: evaluateRelevance(productQuery || matchedKeywords[0] || '', product)
         }))
         .sort((a, b) => b.relevance - a.relevance)
-        .slice(0, AI_CONFIG.productSearch.maxResults);
+        .slice(0, isSpecificProductQuestion ? 3 : AI_CONFIG.productSearch.maxResults);
       
       logAI(`Encontrados ${relevantProducts.length} produtos relevantes`);
       return relevantProducts;
