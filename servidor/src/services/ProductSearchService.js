@@ -4,7 +4,7 @@
 import { Op } from 'sequelize';
 import Product from '../models/ProductModel.js';
 import { AI_CONFIG, logAI } from '../config/aiConfig.js';
-import { extractProductQuery } from '../config/prompts.js';
+import { extractProductQuery, isStockQuery } from '../config/prompts.js';
 
 // Calcula a similaridade entre duas strings (algoritmo simples de similaridade)
 const calculateSimilarity = (str1, str2) => {
@@ -68,6 +68,13 @@ const ProductSearchService = {
     try {
       // Verifica se a pergunta pede todos os produtos disponíveis
       const askingForAllProducts = /(?:quais|que|todos os|mostre os|liste os|ver|veja|ver todos|mostrar todos|mostrar|todos|todas as)?\s*(?:produtos|mercadorias|itens|opções)?\s*(?:disponíveis|cadastrados|temos|tem|há|existentes|em estoque|a venda|para comprar|que vocês vendem|que você vende|que temos|que tem)/i.test(userQuestion.toLowerCase());
+
+      // Verifica se é uma pergunta sobre quantidade em estoque
+      const isStockQuestion = isStockQuery(userQuestion);
+      
+      if (isStockQuestion) {
+        logAI('Usuário perguntou sobre quantidade de estoque');
+      }
 
       if (askingForAllProducts) {
         logAI('Usuário pediu para listar TODOS os produtos disponíveis');
@@ -142,7 +149,7 @@ const ProductSearchService = {
           relevance: evaluateRelevance(productQuery || matchedKeywords[0] || '', product)
         }))
         .sort((a, b) => b.relevance - a.relevance)
-        .slice(0, isSpecificProductQuestion ? 3 : AI_CONFIG.productSearch.maxResults);
+        .slice(0, isSpecificProductQuestion || isStockQuestion ? products.length : AI_CONFIG.productSearch.maxResults);
       
       logAI(`Encontrados ${relevantProducts.length} produtos relevantes`);
       return relevantProducts;

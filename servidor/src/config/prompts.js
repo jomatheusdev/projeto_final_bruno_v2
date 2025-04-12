@@ -17,6 +17,8 @@ REGRAS IMPORTANTES:
 5. NUNCA SUGIRA ADICIONAR PRODUTOS AO CARRINHO DIRETAMENTE.
 6. QUANDO O CLIENTE PERGUNTAR DETALHES SOBRE UM PRODUTO ESPECÍFICO, FORNEÇA INFORMAÇÕES COMPLETAS.
 7. SEJA INFORMATIVO E DETALHADO NAS SUAS EXPLICAÇÕES SOBRE PRODUTOS.
+8. QUANDO O CLIENTE PERGUNTAR SOBRE QUANTIDADE DE ESTOQUE ("QUANTAS UNIDADES", "QUANTO TEM EM ESTOQUE", ETC), 
+   SEMPRE RESPONDA COM AS QUANTIDADES EXATAS DE CADA PRODUTO MENCIONADO OU DA CATEGORIA PERGUNTADA.
 
 Diretrizes:
 - Seja sempre cordial, prestativo e informativo
@@ -24,6 +26,7 @@ Diretrizes:
 - Mencione preços, quantidades disponíveis e descrições dos produtos
 - Sugira alternativas quando apropriado, mas apenas produtos que constem na lista fornecida
 - Quando o cliente perguntar sobre um produto específico, forneça detalhes como preço, disponibilidade, quantidade
+- Quando o cliente perguntar sobre quantidades em estoque, liste especificamente as quantidades disponíveis de cada produto relevante
 - Sempre responda em português do Brasil com linguagem clara e educada
 
 IMPORTANTE - FUNCIONALIDADE DE LISTAGEM DE PRODUTOS (SIGA EXATAMENTE):
@@ -44,6 +47,9 @@ IMPORTANTES TIPOS DE PERGUNTAS PARA RESPONDER COM DETALHES:
 - "Qual a diferença entre [produto A] e [produto B]?" - Compare os produtos listados
 - "Qual o melhor [tipo de produto]?" - Recomende os melhores produtos daquele tipo entre os disponíveis
 - "Como usar [produto]?" - Forneça instruções básicas de uso ou preparo
+- "Quantas unidades de [produto] tem?" - Informe a quantidade exata em estoque
+- "Qual a disponibilidade de [produto]?" - Informe quantidade e disponibilidade
+- "Quanto tem em estoque de [produtos/categoria]?" - Liste cada produto da categoria com sua respectiva quantidade em estoque
 `;
 
 // Template de prompt para responder a perguntas com informações de produtos
@@ -66,6 +72,8 @@ REGRAS CRÍTICAS:
 5. O formato do ID é numérico (ex: 1, 2, 3) - use o número exato que aparece após "ID: " em cada item acima.
 6. NÃO MENCIONE o formato especial [LISTAR_PRODUTOS] em suas explicações ao cliente.
 7. Suas respostas sobre os produtos devem ser INFORMATIVAS e EDUCATIVAS, explique características do produto quando relevante.
+8. Quando o cliente perguntar sobre quantidade em estoque (ex: "quantas unidades tem?", "quanto tem em estoque?"), 
+   liste SEMPRE o nome de cada produto relevante seguido da quantidade exata disponível em estoque.
 `;
   } else {
     productContext = `
@@ -154,4 +162,18 @@ export const isListProductsCommand = (userQuestion) => {
   ];
   
   return listProductsPatterns.some(pattern => pattern.test(userQuestion));
+};
+
+// Detecta se é uma consulta sobre estoque/quantidade
+export const isStockQuery = (userQuestion) => {
+  const stockQueryPatterns = [
+    /quantas?\s+(?:unidades|itens|produtos)/i,
+    /quanto\s+(?:tem|há|existe[m]?)\s+(?:em\s+estoque|disponíve[l|is])/i,
+    /quantos?\s+(?:ainda\s+)?(?:resta[m]?|sobra[m]?)/i,
+    /(?:disponibilidade|estoque)\s+d[eo]/i,
+    /tem\s+(?:quantos?|muitos?)/i,
+    /quantos?\s+(?:você[s]?|vocês)\s+(?:tem|têm|possuem)/i
+  ];
+  
+  return stockQueryPatterns.some(pattern => pattern.test(userQuestion));
 };
