@@ -25,6 +25,8 @@ REGRAS IMPORTANTES:
 11. PERMITA QUE O CLIENTE REMOVA PRODUTOS DO CARRINHO COM COMANDOS COMO "REMOVER [PRODUTO]" OU "TIRAR [PRODUTO] DO CARRINHO".
 12. PERMITA QUE O CLIENTE LIMPE TODO O CARRINHO COM COMANDOS COMO "LIMPAR CARRINHO" OU "ESVAZIAR CARRINHO".
 13. SEMPRE CONFIRME AS OPERAÇÕES REALIZADAS NO CARRINHO E INFORME O ESTADO ATUAL DO CARRINHO APÓS CADA OPERAÇÃO.
+14. QUANDO O CLIENTE PERGUNTAR SOBRE SUAS COMPRAS ANTERIORES OU HISTÓRICO DE PEDIDOS, FORNEÇA INFORMAÇÕES DETALHADAS USANDO OS DADOS DO HISTÓRICO DE COMPRAS FORNECIDO NO CONTEXTO.
+15. USE SEMPRE OS NOMES REAIS DOS CLIENTES QUANDO DISPONÍVEIS NO CONTEXTO.
 
 Diretrizes:
 - Seja sempre cordial, prestativo e informativo
@@ -35,6 +37,7 @@ Diretrizes:
 - Quando o cliente perguntar sobre quantidades em estoque, liste especificamente as quantidades disponíveis de cada produto relevante
 - Quando o cliente perguntar sobre o carrinho, mostre os itens atuais, quantidades e valor total
 - Quando o cliente adicionar ou remover itens do carrinho, confirme a operação e mostre o estado atualizado do carrinho
+- Quando o cliente perguntar sobre seu histórico de pedidos ou compras anteriores, forneça detalhes precisos incluindo datas, valores e produtos
 - Sempre responda em português do Brasil com linguagem clara e educada
 
 IMPORTANTE - FUNCIONALIDADE DE LISTAGEM DE PRODUTOS (SIGA EXATAMENTE):
@@ -60,7 +63,7 @@ IMPORTANTE - FUNCIONALIDADE DE MANIPULAÇÃO DO CARRINHO (SIGA EXATAMENTE):
 `;
 
 // Template de prompt para responder a perguntas com informações de produtos
-export const createProductAssistantPrompt = (userQuestion, conversationContext = '', availableProducts = [], cartItems = []) => {
+export const createProductAssistantPrompt = (userQuestion, conversationContext = '', availableProducts = [], cartItems = [], orderHistory = [], purchaseStats = null) => {
   // Se há produtos disponíveis, inclua-os no contexto
   let productContext = '';
   
@@ -117,6 +120,57 @@ COMANDOS DO CARRINHO:
 `;
   }
 
+  // Adicionar informações de histórico de compras, se disponíveis
+  let orderContext = '';
+  if (orderHistory && orderHistory.length > 0) {
+    orderContext = `
+HISTÓRICO DE COMPRAS DO CLIENTE:
+
+${orderHistory.map((order, index) => {
+  return `PEDIDO #${order.orderId} - ${order.date}:
+  - Valor total: R$ ${order.total.toFixed(2)}
+  - Método de pagamento: ${order.paymentMethod}
+  - Status: ${order.status}
+  - Total de itens: ${order.totalItems} unidades de ${order.uniqueProducts} produtos diferentes
+  
+  Produtos comprados:
+  ${order.items.map(item => 
+    `  • ${item.productName} - ${item.quantity}x R$ ${item.unitPrice.toFixed(2)} = R$ ${item.total.toFixed(2)}`
+  ).join('\n')}
+  `;
+}).join('\n')}`;
+  }
+
+  // Adicionar estatísticas de compra, se disponíveis
+  let statsContext = '';
+  if (purchaseStats) {
+    statsContext = `
+ESTATÍSTICAS DE COMPRA DO CLIENTE:
+- Total de pedidos realizados: ${purchaseStats.totalOrders}
+- Valor total gasto: R$ ${purchaseStats.totalSpent?.toFixed(2)}
+- Valor médio por pedido: R$ ${purchaseStats.averageOrderValue?.toFixed(2)}
+- Última compra realizada em: ${purchaseStats.lastOrderDate}
+
+Produtos mais comprados:
+${purchaseStats.mostPurchasedProducts?.map(product => 
+  `- ${product.name}: ${product.quantity} unidades (comprado ${product.timesOrdered} vezes)`
+).join('\n') || 'Nenhuma estatística disponível'}
+`;
+  }
+
+  // Se temos dados de pedidos ou estatísticas, adicione instruções específicas
+  let orderInstructions = '';
+  if ((orderHistory && orderHistory.length > 0) || purchaseStats) {
+    orderInstructions = `
+INSTRUÇÕES PARA PERGUNTAS SOBRE COMPRAS ANTERIORES:
+1. Se o cliente perguntar sobre seu histórico de compras ou pedidos anteriores, forneça detalhes usando as informações acima.
+2. Se perguntar "o que comprei recentemente", resuma os itens do pedido mais recente.
+3. Se perguntar sobre quanto gastou, mencione o valor do último pedido e o total gasto se disponível.
+4. Se perguntar sobre produtos específicos que já comprou antes, verifique no histórico antes de responder.
+5. SEMPRE use os dados exatos conforme listados no histórico de compras, não invente valores!
+`;
+  }
+
   return `${ASSISTANT_SCOPE}
 ${conversationContext ? `Contexto da conversa anterior:
 ${conversationContext}
@@ -125,9 +179,16 @@ ${conversationContext}
 
 ${cartContext}
 
+${orderContext}
+
+${statsContext}
+
+${orderInstructions}
+
 A pergunta atual do cliente é: "${userQuestion}"
 
 Responda de forma útil, amigável e INFORMATIVA, SEMPRE mencionando os produtos disponíveis quando o cliente perguntar sobre disponibilidade.
+Se o cliente estiver perguntando sobre seu histórico de compras, forneça informações detalhadas dos pedidos anteriores quando disponíveis.
 LEMBRE-SE: 
 - Se o cliente quiser ver produtos específicos ou todos os produtos, use exatamente o formato [LISTAR_PRODUTOS]ID1,ID2,ID3...
 - Se o cliente pedir para adicionar um produto ao carrinho, use exatamente o formato [ADICIONAR_AO_CARRINHO]ID
@@ -235,8 +296,27 @@ export const isCartCommand = (userQuestion) => {
   return cartCommandPatterns.some(pattern => pattern.test(userQuestion));
 };
 
+// Detecta se é uma consulta sobre histórico de pedidos
+export const isOrderHistoryQuery = (userQuestion) => {
+  const orderHistoryPatterns = [
+    /(?:meu[s]?|o[s]?\s+meu[s]?)\s+(?:pedido[s]?|compra[s]?|histórico)/i,
+    /(?:o\s+que|quais|quanto|quando)\s+(?:comprei|pedi|gastei)/i,
+    /(?:última[s]?|recente[s]?)\s+(?:compra[s]?|pedido[s]?)/i,
+    /(?:histórico|relação)\s+d[eo]\s+(?:compras?|pedidos?)/i,
+    /(?:já|antes)\s+(?:comprei|pedi|adquiri)/i,
+    /(?:mostre|mostre-me|exiba|liste)\s+(?:meu[s]?\s+pedido[s]?|minha[s]?\s+compra[s]?)/i,
+    /quanto\s+(?:gastei|já\s+gastei|tenho\s+gastado)/i,
+    /produtos?\s+(?:que\s+)?(?:mais\s+)?compro/i
+  ];
+  
+  return orderHistoryPatterns.some(pattern => pattern.test(userQuestion));
+};
+
 // Extrai o nome do produto a ser adicionado/removido do carrinho
 export const extractCartProductAction = (userQuestion) => {
+  // Lista de palavras comuns para ignorar
+  const commonWords = ['o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos'];
+  
   // Para adicionar ao carrinho
   const addPatterns = [
     /(?:adicionar?|incluir?|colocar?|inserir?|por?|botar?)\s+(.+?)\s+(?:n[ao]|para\s+[oa]|ao)\s+carrinho/i,

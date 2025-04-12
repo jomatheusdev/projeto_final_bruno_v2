@@ -27,6 +27,8 @@ const orderController = {
       
       // Cria os itens do pedido e atualiza estoque
       const orderItems = [];
+      const orderItemsDetails = [];
+      let totalItems = 0;
       
       for (const item of items) {
         // Verifica se o produto existe e tem estoque
@@ -55,6 +57,17 @@ const orderController = {
         
         orderItems.push(orderItem);
         
+        // Guarda detalhes para retornar na resposta
+        orderItemsDetails.push({
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          quantity: item.quantity,
+          total: item.price * item.quantity
+        });
+        
+        totalItems += item.quantity;
+        
         // Atualiza o estoque do produto
         await Product.update(
           { quantity: product.quantity - item.quantity },
@@ -64,10 +77,16 @@ const orderController = {
       
       await transaction.commit();
       
+      // Retorna informações detalhadas sobre a compra
       res.status(201).json({
         message: 'Compra realizada com sucesso',
         orderId: order.id,
-        total: order.total
+        orderDate: order.createdAt,
+        paymentMethod: order.paymentMethod,
+        totalAmount: parseFloat(order.total).toFixed(2),
+        totalItems: totalItems,
+        uniqueProducts: orderItemsDetails.length,
+        items: orderItemsDetails
       });
       
     } catch (error) {

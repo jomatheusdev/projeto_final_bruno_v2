@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AI_MODELS, AI_CONFIG, GENERATION_CONFIG, logAI, isValidApiKey } from '../config/aiConfig.js';
-import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand, isCartCommand } from '../config/prompts.js';
+import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand, isCartCommand, isOrderHistoryQuery } from '../config/prompts.js';
 import ProductSearchService from './ProductSearchService.js';
 
 // Mapa de conexões de usuários
@@ -270,6 +270,12 @@ const aiService = {
         logAI('Detectado comando relacionado ao carrinho');
       }
       
+      // Verificar se é uma pergunta sobre pedidos/histórico de compras
+      const isOrderQuery = isOrderHistoryQuery(userMessage.text);
+      if (isOrderQuery) {
+        logAI('Detectada consulta sobre histórico de pedidos');
+      }
+      
       // Busca produtos relacionados à pergunta do usuário
       let relatedProducts = await ProductSearchService.findRelatedProducts(userMessage.text);
       
@@ -279,23 +285,40 @@ const aiService = {
         relatedProducts = await ProductSearchService.findAllProducts(5);
       }
       
-      // Para debugging
-      if (relatedProducts.length > 0) {
-        logAI(`Produtos disponíveis para sugestão: ${relatedProducts.map(p => p.name).join(', ')}`);
-      } else {
-        logAI("ALERTA: Nenhum produto disponível para oferecer ao usuário!");
+      // Busca informações de pedidos do usuário se a pergunta for relacionada a compras
+      let userOrderHistory = null;
+      let purchaseStats = null;
+      if (isOrderQuery && userMessage.userId !== 'system') {
+        try {
+          // Tentamos buscar o histórico de compras do usuário
+          const userId = userMessage.userId || 1; // Usando 1 como fallback para testes
+          
+          logAI(`Buscando histórico de pedidos para usuário: ${userId}`);
+          userOrderHistory = await ProductSearchService.getUserOrderHistory(userId);
+          
+          // Se conseguiu obter o histórico, também busca estatísticas de compra
+          if (userOrderHistory && userOrderHistory.success) {
+            purchaseStats = await ProductSearchService.getUserPurchaseStats(userId);
+            logAI(`Estatísticas de compras recuperadas: ${purchaseStats.success}`);
+          }
+        } catch (orderError) {
+          logAI('Erro ao buscar histórico de pedidos:', orderError);
+        }
       }
       
       try {
         if (isGeminiAvailable && geminiModel) {
-          // Cria o prompt para a IA usando o template e incluindo os produtos
+          // Cria o prompt para a IA usando o template e incluindo os produtos e informações de pedidos
           const prompt = createProductAssistantPrompt(
             userMessage.text, 
             conversationContext,
-            relatedProducts
+            relatedProducts,
+            [], // Carrinho vazio por enquanto
+            userOrderHistory?.orders || [],
+            purchaseStats?.stats || null
           );
           
-          logAI('Enviando prompt para o modelo Gemini com informações de produtos');
+          logAI('Enviando prompt para o modelo Gemini com informações de produtos e pedidos');
           
           // Gera a resposta da IA com timeout
           const result = await Promise.race([
@@ -319,8 +342,13 @@ const aiService = {
       } catch (apiError) {
         logAI('Erro ao chamar API Gemini', apiError);
         
+        // Se a pergunta era sobre histórico de pedidos e temos dados, gera uma resposta manual
+        if (isOrderQuery && userOrderHistory && userOrderHistory.success && userOrderHistory.orders.length > 0) {
+          const lastOrder = userOrderHistory.orders[0];
+          aiResponse = `De acordo com seu histórico, sua última compra foi feita em ${lastOrder.date} no valor total de R$ ${lastOrder.total.toFixed(2)} com ${lastOrder.totalItems} itens. Quer mais detalhes sobre esta compra?`;
+        } 
         // Resposta personalizada com produtos encontrados
-        if (relatedProducts.length > 0) {
+        else if (relatedProducts.length > 0) {
           const productList = relatedProducts
             .map(p => `${p.name}: R$ ${p.price.toFixed(2)}`)
             .join(', ');

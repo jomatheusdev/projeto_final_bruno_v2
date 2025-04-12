@@ -3,6 +3,8 @@
  */
 import { Op } from 'sequelize';
 import Product from '../models/ProductModel.js';
+import Order from '../models/OrderModel.js';
+import OrderItem from '../models/OrderItemModel.js';
 import { AI_CONFIG, logAI } from '../config/aiConfig.js';
 import { extractProductQuery, isStockQuery } from '../config/prompts.js';
 
@@ -240,6 +242,7 @@ const ProductSearchService = {
       const productsForPurchase = stockCheck.products;
       const updatedProducts = [];
       let totalValue = 0;
+      let totalItems = 0;
       
       for (let i = 0; i < productsForPurchase.length; i++) {
         const product = productsForPurchase[i];
@@ -254,20 +257,25 @@ const ProductSearchService = {
         }
         
         // Atualiza o estoque
+        const newQuantity = product.quantity - requestedQuantity;
         await Product.update(
-          { quantity: product.quantity - requestedQuantity },
+          { quantity: newQuantity },
           { where: { id: product.id } }
         );
+        
+        const subtotal = product.price * requestedQuantity;
         
         updatedProducts.push({
           id: product.id,
           name: product.name,
           price: product.price,
           quantity: requestedQuantity,
-          subtotal: product.price * requestedQuantity
+          subtotal: subtotal,
+          estoque_restante: newQuantity
         });
         
-        totalValue += product.price * requestedQuantity;
+        totalValue += subtotal;
+        totalItems += requestedQuantity;
       }
       
       return {
@@ -276,12 +284,281 @@ const ProductSearchService = {
         purchaseDetails: {
           products: updatedProducts,
           totalValue: totalValue,
+          totalItems: totalItems,
+          uniqueProducts: updatedProducts.length,
+          valorMedioItem: totalItems > 0 ? (totalValue / totalItems) : 0,
           purchaseDate: new Date().toISOString()
         }
       };
     } catch (error) {
       logAI('Erro ao finalizar compra:', error);
       return { success: false, message: 'Erro ao processar a compra' };
+    }
+  },
+
+  // Busca histórico de compras de um usuário
+  getUserOrderHistory: async (userId, limit = 5) => {
+    try {
+      if (!userId) {
+        return { success: false, message: 'ID do usuário é obrigatório' };
+      }
+
+      const orders = await Order.findAll({
+        where: { userId: userId },
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            include: [{
+              model: Product,
+              attributes: ['name', 'price', 'imageUrl', 'description']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']],
+        limit: limit
+      });
+
+      if (orders.length === 0) {
+        return { 
+          success: true, 
+          message: 'Nenhuma compra encontrada para este usuário',
+          orders: []
+        };
+      }
+
+      // Formata os dados para um formato mais amigável para a IA
+      const formattedOrders = orders.map(order => {
+        const formattedDate = new Date(order.createdAt).toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        const items = order.items.map(item => ({
+          productId: item.productId,
+          productName: item.Product?.name || 'Produto não encontrado',
+          quantity: item.quantity,
+          unitPrice: parseFloat(item.price),
+          total: parseFloat(item.price) * item.quantity
+        }));
+
+        const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+        const uniqueProducts = items.length;
+
+        return {
+          orderId: order.id,
+          date: formattedDate,
+          timestamp: order.createdAt,
+          total: parseFloat(order.total),
+          paymentMethod: order.paymentMethod,
+          status: order.status,
+          items: items,
+          totalItems: totalItems,
+          uniqueProducts: uniqueProducts
+        };
+      });
+
+      logAI(`Histórico de compras recuperado para usuário ${userId}: ${formattedOrders.length} pedidos`);
+      
+      return {
+        success: true,
+        message: `${formattedOrders.length} compras encontradas`,
+        orders: formattedOrders
+      };
+    } catch (error) {
+      logAI(`Erro ao buscar histórico de compras para usuário ${userId}:`, error);
+      return {
+        success: false,
+        message: 'Erro ao buscar histórico de compras'
+      };
+    }
+  },
+
+  // Obter detalhes específicos de um pedido
+  getOrderDetails: async (orderId, userId) => {
+    try {
+      if (!orderId) {
+        return { success: false, message: 'ID do pedido é obrigatório' };
+      }
+
+      const whereClause = { id: orderId };
+      if (userId) {
+        whereClause.userId = userId;
+      }
+
+      const order = await Order.findOne({
+        where: whereClause,
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            include: [{
+              model: Product,
+              attributes: ['id', 'name', 'price', 'description', 'imageUrl']
+            }]
+          }
+        ]
+      });
+
+      if (!order) {
+        return {
+          success: false,
+          message: 'Pedido não encontrado'
+        };
+      }
+
+      // Formata os dados do pedido para facilitar o uso pela IA
+      const formattedDate = new Date(order.createdAt).toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      const items = order.items.map(item => ({
+        productId: item.productId,
+        productName: item.Product?.name || 'Produto não encontrado',
+        description: item.Product?.description || '',
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.price),
+        total: parseFloat(item.price) * item.quantity,
+        imageUrl: item.Product?.imageUrl || null
+      }));
+
+      const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+      
+      const orderDetails = {
+        orderId: order.id,
+        date: formattedDate,
+        timestamp: order.createdAt,
+        total: parseFloat(order.total),
+        paymentMethod: order.paymentMethod,
+        status: order.status,
+        items: items,
+        totalItems: totalItems,
+        uniqueProducts: items.length
+      };
+
+      logAI(`Detalhes do pedido ${orderId} recuperados com sucesso`);
+      
+      return {
+        success: true,
+        message: 'Detalhes do pedido recuperados com sucesso',
+        order: orderDetails
+      };
+    } catch (error) {
+      logAI(`Erro ao buscar detalhes do pedido ${orderId}:`, error);
+      return {
+        success: false,
+        message: 'Erro ao buscar detalhes do pedido'
+      };
+    }
+  },
+
+  // Obter estatísticas de compra de um usuário
+  getUserPurchaseStats: async (userId) => {
+    try {
+      if (!userId) {
+        return { success: false, message: 'ID do usuário é obrigatório' };
+      }
+
+      // Todas as compras do usuário
+      const orders = await Order.findAll({
+        where: { userId: userId },
+        include: [
+          {
+            model: OrderItem,
+            as: 'items',
+            include: [{
+              model: Product,
+              attributes: ['name', 'price', 'category']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+
+      if (orders.length === 0) {
+        return { 
+          success: true, 
+          message: 'Nenhuma compra encontrada para este usuário',
+          stats: {
+            totalOrders: 0,
+            totalSpent: 0,
+            averageOrderValue: 0
+          }
+        };
+      }
+
+      // Calcular estatísticas gerais
+      const totalOrders = orders.length;
+      const totalSpent = orders.reduce((sum, order) => sum + parseFloat(order.total), 0);
+      const averageOrderValue = totalSpent / totalOrders;
+
+      // Calcular produtos mais comprados
+      const productFrequency = {};
+      orders.forEach(order => {
+        order.items.forEach(item => {
+          const productName = item.Product?.name || `Produto ID ${item.productId}`;
+          if (!productFrequency[productName]) {
+            productFrequency[productName] = {
+              quantity: 0,
+              totalSpent: 0,
+              timesOrdered: 0
+            };
+          }
+          productFrequency[productName].quantity += item.quantity;
+          productFrequency[productName].totalSpent += parseFloat(item.price) * item.quantity;
+          productFrequency[productName].timesOrdered += 1;
+        });
+      });
+
+      // Converter para array e ordenar por quantidade
+      const mostPurchasedProducts = Object.entries(productFrequency)
+        .map(([name, stats]) => ({
+          name,
+          quantity: stats.quantity,
+          totalSpent: stats.totalSpent,
+          timesOrdered: stats.timesOrdered
+        }))
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 5); // Top 5 produtos mais comprados
+
+      // Informações da compra mais recente
+      const lastOrder = orders[0];
+      const lastOrderDate = new Date(lastOrder.createdAt).toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+
+      const stats = {
+        totalOrders,
+        totalSpent,
+        averageOrderValue,
+        mostPurchasedProducts,
+        lastOrderDate,
+        lastOrderId: lastOrder.id,
+        lastOrderTotal: parseFloat(lastOrder.total)
+      };
+
+      logAI(`Estatísticas de compra recuperadas para usuário ${userId}`);
+      
+      return {
+        success: true,
+        message: 'Estatísticas de compra recuperadas com sucesso',
+        stats
+      };
+    } catch (error) {
+      logAI(`Erro ao buscar estatísticas de compra para usuário ${userId}:`, error);
+      return {
+        success: false,
+        message: 'Erro ao buscar estatísticas de compra'
+      };
     }
   }
 };

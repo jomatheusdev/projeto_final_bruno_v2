@@ -113,9 +113,28 @@ export default function CartScreen() {
         setIsProcessing(false);
         setShowPaymentMethods(false);
         
+        // Formatar data da compra
+        let orderDate = "";
+        if (response.data.orderDate) {
+          const date = new Date(response.data.orderDate);
+          orderDate = date.toLocaleDateString('pt-BR') + ' às ' + date.toLocaleTimeString('pt-BR');
+        }
+        
+        // Mensagem detalhada sobre a compra
+        const resumoCompra = 
+          `Pedido #${response.data.orderId} - ${orderDate}\n\n` +
+          `Método de pagamento: ${getPaymentMethodName(response.data.paymentMethod)}\n` +
+          `Total de itens: ${response.data.totalItems}\n` + 
+          `Quantidade de produtos: ${response.data.uniqueProducts}\n` +
+          `Valor total: R$ ${response.data.totalAmount}\n\n` +
+          `Itens comprados:\n` +
+          `${response.data.items?.map(item => 
+            `• ${item.name} (${item.quantity}x): R$ ${item.total.toFixed(2)}`
+          ).join('\n')}`;
+        
         Alert.alert(
-          "Compra finalizada",
-          "Seus produtos foram comprados com sucesso!",
+          "Compra finalizada com sucesso!",
+          resumoCompra,
           [{ text: "OK" }]
         );
       }
@@ -133,6 +152,12 @@ export default function CartScreen() {
     }
   };
   
+  // Função para obter o nome do método de pagamento pelo ID
+  const getPaymentMethodName = (methodId: string): string => {
+    const method = paymentMethods.find(m => m.id === methodId);
+    return method ? method.name : methodId;
+  };
+
   const renderCartItem = ({ item }) => (
     <View style={styles.cartItem}>
       {item.imageUrl ? (
