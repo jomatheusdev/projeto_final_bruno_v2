@@ -19,6 +19,12 @@ REGRAS IMPORTANTES:
 7. SEJA INFORMATIVO E DETALHADO NAS SUAS EXPLICAÇÕES SOBRE PRODUTOS.
 8. QUANDO O CLIENTE PERGUNTAR SOBRE QUANTIDADE DE ESTOQUE ("QUANTAS UNIDADES", "QUANTO TEM EM ESTOQUE", ETC), 
    SEMPRE RESPONDA COM AS QUANTIDADES EXATAS DE CADA PRODUTO MENCIONADO OU DA CATEGORIA PERGUNTADA.
+9. QUANDO O CLIENTE PERGUNTAR SOBRE O CARRINHO ("O QUE TEM NO CARRINHO", "MOSTRAR CARRINHO", ETC),
+   LISTE TODOS OS PRODUTOS NO CARRINHO COM SEUS NOMES, QUANTIDADES E PREÇOS.
+10. PERMITA QUE O CLIENTE ADICIONE PRODUTOS AO CARRINHO COM COMANDOS COMO "ADICIONAR [PRODUTO]" OU "COLOCAR [PRODUTO] NO CARRINHO".
+11. PERMITA QUE O CLIENTE REMOVA PRODUTOS DO CARRINHO COM COMANDOS COMO "REMOVER [PRODUTO]" OU "TIRAR [PRODUTO] DO CARRINHO".
+12. PERMITA QUE O CLIENTE LIMPE TODO O CARRINHO COM COMANDOS COMO "LIMPAR CARRINHO" OU "ESVAZIAR CARRINHO".
+13. SEMPRE CONFIRME AS OPERAÇÕES REALIZADAS NO CARRINHO E INFORME O ESTADO ATUAL DO CARRINHO APÓS CADA OPERAÇÃO.
 
 Diretrizes:
 - Seja sempre cordial, prestativo e informativo
@@ -27,6 +33,8 @@ Diretrizes:
 - Sugira alternativas quando apropriado, mas apenas produtos que constem na lista fornecida
 - Quando o cliente perguntar sobre um produto específico, forneça detalhes como preço, disponibilidade, quantidade
 - Quando o cliente perguntar sobre quantidades em estoque, liste especificamente as quantidades disponíveis de cada produto relevante
+- Quando o cliente perguntar sobre o carrinho, mostre os itens atuais, quantidades e valor total
+- Quando o cliente adicionar ou remover itens do carrinho, confirme a operação e mostre o estado atualizado do carrinho
 - Sempre responda em português do Brasil com linguagem clara e educada
 
 IMPORTANTE - FUNCIONALIDADE DE LISTAGEM DE PRODUTOS (SIGA EXATAMENTE):
@@ -41,19 +49,18 @@ IMPORTANTE - FUNCIONALIDADE DE LISTAGEM DE PRODUTOS (SIGA EXATAMENTE):
 - É ESSENCIAL incluir o ID do produto exatamente após o prefixo [LISTAR_PRODUTOS] para que o sistema funcione!
 - NUNCA use o prefixo [LISTAR_PRODUTOS] sem incluir pelo menos um ID numérico logo depois.
 
-IMPORTANTES TIPOS DE PERGUNTAS PARA RESPONDER COM DETALHES:
-- "O que é [produto]?" - Forneça uma descrição detalhada sobre o produto
-- "Para que serve [produto]?" - Explique os usos comuns daquele produto
-- "Qual a diferença entre [produto A] e [produto B]?" - Compare os produtos listados
-- "Qual o melhor [tipo de produto]?" - Recomende os melhores produtos daquele tipo entre os disponíveis
-- "Como usar [produto]?" - Forneça instruções básicas de uso ou preparo
-- "Quantas unidades de [produto] tem?" - Informe a quantidade exata em estoque
-- "Qual a disponibilidade de [produto]?" - Informe quantidade e disponibilidade
-- "Quanto tem em estoque de [produtos/categoria]?" - Liste cada produto da categoria com sua respectiva quantidade em estoque
+IMPORTANTE - FUNCIONALIDADE DE MANIPULAÇÃO DO CARRINHO (SIGA EXATAMENTE):
+- Quando o cliente pedir para adicionar um produto ao carrinho, você DEVE responder no formato: "[ADICIONAR_AO_CARRINHO]ID Sua mensagem normal"
+- Quando o cliente pedir para remover um produto do carrinho, você DEVE responder no formato: "[REMOVER_DO_CARRINHO]ID Sua mensagem normal"
+- Quando o cliente pedir para limpar o carrinho todo, você DEVE responder no formato: "[LIMPAR_CARRINHO] Sua mensagem normal"
+- Quando o cliente pedir para mostrar o carrinho, você DEVE responder no formato: "[MOSTRAR_CARRINHO] Sua mensagem normal"
+- Por exemplo: Se o cliente diz "adicione arroz ao carrinho" e o arroz tem ID 1, responda com:
+  "[ADICIONAR_AO_CARRINHO]1 Adicionei o Arroz ao seu carrinho. Gostaria de adicionar mais algum item?"
+- É ESSENCIAL incluir o ID do produto exatamente após o prefixo para que o sistema funcione!
 `;
 
 // Template de prompt para responder a perguntas com informações de produtos
-export const createProductAssistantPrompt = (userQuestion, conversationContext = '', availableProducts = []) => {
+export const createProductAssistantPrompt = (userQuestion, conversationContext = '', availableProducts = [], cartItems = []) => {
   // Se há produtos disponíveis, inclua-os no contexto
   let productContext = '';
   
@@ -81,17 +88,52 @@ ATENÇÃO: Não há produtos disponíveis para consulta no momento. Informe ao c
 `;
   }
 
+  // Adicionar informações do carrinho de compras
+  let cartContext = '';
+  if (cartItems && cartItems.length > 0) {
+    const cartTotal = cartItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
+    
+    cartContext = `
+CARRINHO DE COMPRAS ATUAL:
+${cartItems.map((item, index) => 
+  `${index + 1}. ID: ${item.id}, ${item.name}: R$ ${item.price.toFixed(2)} x ${item.quantity || 1} = R$ ${(item.price * (item.quantity || 1)).toFixed(2)}`
+).join('\n')}
+Total do carrinho: R$ ${cartTotal.toFixed(2)}
+Total de itens: ${cartItems.length} produtos diferentes
+
+COMANDOS DO CARRINHO:
+- Para adicionar um produto ao carrinho, responda com: [ADICIONAR_AO_CARRINHO]ID
+- Para remover um produto do carrinho, responda com: [REMOVER_DO_CARRINHO]ID
+- Para limpar todo o carrinho, responda com: [LIMPAR_CARRINHO]
+- Para mostrar o conteúdo atual do carrinho, responda com: [MOSTRAR_CARRINHO]
+`;
+  } else {
+    cartContext = `
+CARRINHO DE COMPRAS: O carrinho está vazio no momento.
+
+COMANDOS DO CARRINHO:
+- Para adicionar um produto ao carrinho, responda com: [ADICIONAR_AO_CARRINHO]ID
+- Para mostrar o conteúdo atual do carrinho, responda com: [MOSTRAR_CARRINHO]
+`;
+  }
+
   return `${ASSISTANT_SCOPE}
 ${conversationContext ? `Contexto da conversa anterior:
 ${conversationContext}
 
 ` : ''}${productContext}
 
+${cartContext}
+
 A pergunta atual do cliente é: "${userQuestion}"
 
 Responda de forma útil, amigável e INFORMATIVA, SEMPRE mencionando os produtos disponíveis quando o cliente perguntar sobre disponibilidade.
-LEMBRE-SE: Se o cliente quiser ver produtos específicos ou todos os produtos, use exatamente o formato [LISTAR_PRODUTOS]ID1,ID2,ID3...
-Se o cliente pedir para listar TODOS os produtos disponíveis, inclua TODOS os IDs da lista em sua resposta.`;
+LEMBRE-SE: 
+- Se o cliente quiser ver produtos específicos ou todos os produtos, use exatamente o formato [LISTAR_PRODUTOS]ID1,ID2,ID3...
+- Se o cliente pedir para adicionar um produto ao carrinho, use exatamente o formato [ADICIONAR_AO_CARRINHO]ID
+- Se o cliente pedir para remover um produto do carrinho, use exatamente o formato [REMOVER_DO_CARRINHO]ID
+- Se o cliente pedir para limpar o carrinho, use exatamente o formato [LIMPAR_CARRINHO]
+- Se o cliente pedir para ver o carrinho, use exatamente o formato [MOSTRAR_CARRINHO]`;
 };
 
 // Template para respostas de fallback quando a IA principal falha
@@ -176,4 +218,70 @@ export const isStockQuery = (userQuestion) => {
   ];
   
   return stockQueryPatterns.some(pattern => pattern.test(userQuestion));
+};
+
+// Detecta se é um comando relacionado ao carrinho
+export const isCartCommand = (userQuestion) => {
+  const cartCommandPatterns = [
+    /(?:adicionar?|incluir?|colocar?|inserir?|por?|botar?)\s+(?:.+)\s+(?:n[ao]|para\s+[oa]|ao)\s+carrinho/i,
+    /(?:remover?|tirar?|retirar?|excluir?|deletar?)\s+(?:.+)\s+(?:d[ao])\s+carrinho/i,
+    /(?:limpar?|esvaziar?|zerar?)\s+(?:o\s+)?carrinho/i,
+    /(?:mostrar?|ver?|exibir?|listar?)\s+(?:o\s+)?(?:meu\s+)?carrinho/i,
+    /(?:o\s+que\s+tem|o\s+que\s+há)\s+(?:no|em\s+meu)\s+carrinho/i,
+    /quantos?\s+(?:produtos?|itens?)\s+(?:tem|há)\s+(?:no|em\s+meu)\s+carrinho/i,
+    /(?:qual|quanto\s+é|qual\s+é)\s+o\s+(?:total|valor\s+total|preço\s+total)\s+(?:do|no)\s+carrinho/i
+  ];
+  
+  return cartCommandPatterns.some(pattern => pattern.test(userQuestion));
+};
+
+// Extrai o nome do produto a ser adicionado/removido do carrinho
+export const extractCartProductAction = (userQuestion) => {
+  // Para adicionar ao carrinho
+  const addPatterns = [
+    /(?:adicionar?|incluir?|colocar?|inserir?|por?|botar?)\s+(.+?)\s+(?:n[ao]|para\s+[oa]|ao)\s+carrinho/i,
+    /(?:quero|gostaria\s+de)\s+(?:adicionar?|incluir?|colocar?)\s+(.+?)\s+(?:n[ao]|ao)\s+carrinho/i,
+    /(?:comprar?|adicionar?)\s+(.+?)$/i
+  ];
+  
+  // Para remover do carrinho
+  const removePatterns = [
+    /(?:remover?|tirar?|retirar?|excluir?|deletar?)\s+(.+?)\s+(?:d[ao])\s+carrinho/i,
+    /(?:quero|gostaria\s+de)\s+(?:remover?|tirar?)\s+(.+?)\s+(?:d[ao])\s+carrinho/i
+  ];
+  
+  // Tenta encontrar padrões de adição
+  for (const pattern of addPatterns) {
+    const match = userQuestion.match(pattern);
+    if (match && match[1]) {
+      return {
+        action: 'add',
+        productName: match[1].trim().replace(/\s+(o|a|os|as|um|uma|uns|umas|de|da|do|das|dos)$/i, '')
+      };
+    }
+  }
+  
+  // Tenta encontrar padrões de remoção
+  for (const pattern of removePatterns) {
+    const match = userQuestion.match(pattern);
+    if (match && match[1]) {
+      return {
+        action: 'remove',
+        productName: match[1].trim().replace(/\s+(o|a|os|as|um|uma|uns|umas|de|da|do|das|dos)$/i, '')
+      };
+    }
+  }
+  
+  // Verifica se é um comando para limpar o carrinho
+  if (/(?:limpar?|esvaziar?|zerar?)\s+(?:o\s+)?carrinho/i.test(userQuestion)) {
+    return { action: 'clear' };
+  }
+  
+  // Verifica se é um comando para mostrar o carrinho
+  if (/(?:mostrar?|ver?|exibir?|listar?)\s+(?:o\s+)?(?:meu\s+)?carrinho/i.test(userQuestion) ||
+      /(?:o\s+que\s+tem|o\s+que\s+há)\s+(?:no|em\s+meu)\s+carrinho/i.test(userQuestion)) {
+    return { action: 'show' };
+  }
+  
+  return null;
 };

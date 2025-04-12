@@ -10,6 +10,8 @@ import {
   Alert,
   ToastAndroid,
   Platform,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,10 +34,11 @@ interface Product {
   name: string;
   price: number;
   imageUrl?: string;
+  quantity?: number;
 }
 
 const Chat = () => {
-  const { addToCart } = useCart();
+  const { addToCart, removeFromCart, clearCart, cartItems, totalValue } = useCart();
   const [userName, setUserName] = useState('Usuário');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -50,6 +53,7 @@ const Chat = () => {
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [productsToShow, setProductsToShow] = useState<Product[]>([]);
   const [showProductList, setShowProductList] = useState(false);
+  const [showCartModal, setShowCartModal] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -261,6 +265,7 @@ const Chat = () => {
         console.log('Comando enviado com sucesso:', { type: 'new_conversation', sessionId });
         setProductsToShow([]);
         setShowProductList(false);
+        setShowCartModal(false);
       } catch (error) {
         console.error('Erro ao enviar comando de nova conversa:', error);
         Alert.alert('Erro', 'Não foi possível iniciar uma nova conversa');
@@ -355,6 +360,54 @@ const Chat = () => {
               console.warn('Comando de listagem sem produtos');
             }
           }
+          
+          if (data.action === 'show_cart') {
+            console.log('Comando de mostrar carrinho detectado!');
+            setShowCartModal(true);
+            
+            return {
+              ...message,
+              text: data.text || `Aqui está seu carrinho:`,
+              action: 'show_cart'
+            };
+          }
+          
+          if (data.action === 'add_to_cart' && data.productId) {
+            console.log('Comando para adicionar item ao carrinho detectado!');
+            
+            handleAddToCartById(data.productId);
+            
+            return {
+              ...message,
+              text: data.text || `Produto adicionado ao carrinho.`,
+              action: 'add_to_cart'
+            };
+          }
+          
+          if (data.action === 'remove_from_cart' && data.productId) {
+            console.log('Comando para remover item do carrinho detectado!');
+            
+            removeFromCart(data.productId);
+            
+            return {
+              ...message,
+              text: data.text || `Produto removido do carrinho.`,
+              action: 'remove_from_cart'
+            };
+          }
+          
+          if (data.action === 'clear_cart') {
+            console.log('Comando para limpar carrinho detectado!');
+            
+            clearCart();
+            
+            return {
+              ...message,
+              text: data.text || `Seu carrinho foi esvaziado.`,
+              action: 'clear_cart'
+            };
+          }
+          
         } catch (jsonError) {
           console.error('Falha ao processar JSON da mensagem:', jsonError);
         }
@@ -363,12 +416,38 @@ const Chat = () => {
       if (message.type === 'new_conversation') {
         setProductsToShow([]);
         setShowProductList(false);
+        setShowCartModal(false);
       }
       
       return message;
     } catch (e) {
       console.log('Erro ao processar mensagem:', e);
       return message;
+    }
+  };
+
+  const handleAddToCartById = async (productId: string) => {
+    try {
+      const SERVER_URL = 'http://192.168.0.105:3000';
+      
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        showToast('Você precisa estar logado para adicionar produtos ao carrinho');
+        return;
+      }
+      
+      const response = await axios.get(`${SERVER_URL}/api/product/${productId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.data) {
+        const product = response.data;
+        addToCart(product);
+        showToast(`${product.name} adicionado ao carrinho`);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar produto:', error);
+      showToast('Não foi possível adicionar o produto ao carrinho');
     }
   };
 
@@ -385,6 +464,87 @@ const Chat = () => {
       </View>
     );
   }
+
+  const renderCartModal = () => {
+    return (
+      <Modal
+        visible={showCartModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowCartModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.cartModalContent}>
+            <View style={styles.cartModalHeader}>
+              <Text style={styles.cartModalTitle}>Seu Carrinho</Text>
+              <TouchableOpacity 
+                style={styles.closeButton} 
+                onPress={() => setShowCartModal(false)}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            {cartItems.length === 0 ? (
+              <View style={styles.emptyCartMessage}>
+                <Ionicons name="cart-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyCartText}>Seu carrinho está vazio</Text>
+              </View>
+            ) : (
+              <>
+                <ScrollView style={styles.cartItemList}>
+                  {cartItems.map((item, index) => (
+                    <View key={`${item.id}-${index}`} style={styles.cartModalItem}>
+                      <View style={styles.cartItemInfo}>
+                        <Text style={styles.cartItemName}>{item.name}</Text>
+                        <Text style={styles.cartItemPrice}>
+                          R$ {item.price.toFixed(2)} x {item.quantity || 1} = 
+                          R$ {((item.price || 0) * (item.quantity || 1)).toFixed(2)}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.cartItemRemove}
+                        onPress={() => removeFromCart(item.id)}
+                      >
+                        <Ionicons name="trash-outline" size={20} color="red" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+                
+                <View style={styles.cartTotalContainer}>
+                  <Text style={styles.cartTotalText}>
+                    Total: R$ {totalValue.toFixed(2)}
+                  </Text>
+                </View>
+                
+                <View style={styles.cartModalActions}>
+                  <TouchableOpacity 
+                    style={styles.cartActionButton}
+                    onPress={() => {
+                      setShowCartModal(false);
+                    }}
+                  >
+                    <Text style={styles.cartActionButtonText}>Ir para Checkout</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.cartActionButton, styles.clearCartButton]}
+                    onPress={() => {
+                      clearCart();
+                      showToast('Carrinho esvaziado');
+                    }}
+                  >
+                    <Text style={styles.cartActionButtonText}>Limpar Carrinho</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -485,6 +645,8 @@ const Chat = () => {
           />
         </View>
       )}
+
+      {renderCartModal()}
 
       <View style={styles.inputWrapper}>
         <TextInput
@@ -837,6 +999,106 @@ const styles = StyleSheet.create({
     color: '#8a2be2',
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  cartModalContent: {
+    backgroundColor: 'white',
+    width: '100%',
+    maxHeight: '80%',
+    borderRadius: 10,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  cartModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
+  },
+  cartModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    padding: 5,
+  },
+  emptyCartMessage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+  },
+  emptyCartText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 10,
+  },
+  cartItemList: {
+    maxHeight: 300,
+  },
+  cartModalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  cartItemInfo: {
+    flex: 1,
+  },
+  cartItemName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  cartItemPrice: {
+    color: 'green',
+  },
+  cartItemRemove: {
+    padding: 8,
+  },
+  cartTotalContainer: {
+    marginTop: 15,
+    padding: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    alignItems: 'flex-end',
+  },
+  cartTotalText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  cartModalActions: {
+    marginTop: 15,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  cartActionButton: {
+    backgroundColor: '#007bff',
+    padding: 12,
+    borderRadius: 5,
+    flex: 1,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  cartActionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  clearCartButton: {
+    backgroundColor: '#dc3545',
   },
 });
 

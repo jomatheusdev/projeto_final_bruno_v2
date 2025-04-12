@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AI_MODELS, AI_CONFIG, GENERATION_CONFIG, logAI, isValidApiKey } from '../config/aiConfig.js';
-import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand } from '../config/prompts.js';
+import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand, isCartCommand } from '../config/prompts.js';
 import ProductSearchService from './ProductSearchService.js';
 
 // Mapa de conexões de usuários
@@ -264,6 +264,12 @@ const aiService = {
         logAI('Detectado comando de listar produtos');
       }
       
+      // Verificar se é uma intenção relacionada ao carrinho
+      const isCartRelated = isCartCommand(userMessage.text);
+      if (isCartRelated) {
+        logAI('Detectado comando relacionado ao carrinho');
+      }
+      
       // Busca produtos relacionados à pergunta do usuário
       let relatedProducts = await ProductSearchService.findRelatedProducts(userMessage.text);
       
@@ -304,8 +310,8 @@ const aiService = {
           const response = result.response;
           aiResponse = response.text();
           
-          // Analisa a resposta para comandos de listagem de produtos
-          const processedResponse = parseProductListingCommand(aiResponse, relatedProducts);
+          // Analisa a resposta para comandos de listagem de produtos ou carrinho
+          const processedResponse = parseAICommands(aiResponse, relatedProducts);
           aiResponse = processedResponse;
         } else {
           throw new Error('Modelo Gemini não disponível');
@@ -374,17 +380,17 @@ const aiService = {
   }
 };
 
-// Função para processar comandos de listagem de produtos na resposta da IA
-function parseProductListingCommand(response, availableProducts) {
+// Função para processar comandos na resposta da IA
+function parseAICommands(response, availableProducts) {
   // Verifica se a resposta contém comando para listar produtos
   const listCommandRegex = /\[LISTAR_PRODUTOS\]([0-9,]+)\s+(.*)/i;
-  const match = response.match(listCommandRegex);
+  const listMatch = response.match(listCommandRegex);
   
-  if (match) {
+  if (listMatch) {
     logAI(`Comando de listagem de produtos detectado! Texto original: "${response}"`);
     
-    const productIds = match[1].split(',').map(id => id.trim());
-    const messageText = match[2];
+    const productIds = listMatch[1].split(',').map(id => id.trim());
+    const messageText = listMatch[2];
     
     logAI(`IDs de produtos extraídos: ${productIds.join(', ')}`);
     
@@ -429,7 +435,74 @@ function parseProductListingCommand(response, availableProducts) {
     });
   }
   
+  // Verificar comandos relacionados ao carrinho
+  const cartCommandPatterns = {
+    addToCart: /\[ADICIONAR_AO_CARRINHO\]([0-9]+)\s+(.*)/i,
+    removeFromCart: /\[REMOVER_DO_CARRINHO\]([0-9]+)\s+(.*)/i,
+    clearCart: /\[LIMPAR_CARRINHO\]\s+(.*)/i,
+    showCart: /\[MOSTRAR_CARRINHO\]\s+(.*)/i
+  };
+  
+  // Verificar comando para adicionar ao carrinho
+  const addCartMatch = response.match(cartCommandPatterns.addToCart);
+  if (addCartMatch) {
+    const productId = addCartMatch[1];
+    const messageText = addCartMatch[2];
+    
+    logAI(`Comando para adicionar produto ID ${productId} ao carrinho detectado`);
+    
+    return JSON.stringify({
+      text: messageText,
+      action: 'add_to_cart',
+      productId: productId
+    });
+  }
+  
+  // Verificar comando para remover do carrinho
+  const removeCartMatch = response.match(cartCommandPatterns.removeFromCart);
+  if (removeCartMatch) {
+    const productId = removeCartMatch[1];
+    const messageText = removeCartMatch[2];
+    
+    logAI(`Comando para remover produto ID ${productId} do carrinho detectado`);
+    
+    return JSON.stringify({
+      text: messageText,
+      action: 'remove_from_cart',
+      productId: productId
+    });
+  }
+  
+  // Verificar comando para limpar carrinho
+  const clearCartMatch = response.match(cartCommandPatterns.clearCart);
+  if (clearCartMatch) {
+    const messageText = clearCartMatch[1];
+    
+    logAI('Comando para limpar carrinho detectado');
+    
+    return JSON.stringify({
+      text: messageText,
+      action: 'clear_cart'
+    });
+  }
+  
+  // Verificar comando para mostrar carrinho
+  const showCartMatch = response.match(cartCommandPatterns.showCart);
+  if (showCartMatch) {
+    const messageText = showCartMatch[1];
+    
+    logAI('Comando para mostrar carrinho detectado');
+    
+    return JSON.stringify({
+      text: messageText,
+      action: 'show_cart'
+    });
+  }
+  
   return response;
 }
+
+// Renomear a função existente parseProductListingCommand para usar a nova parseAICommands
+const parseProductListingCommand = parseAICommands;
 
 export default aiService;
