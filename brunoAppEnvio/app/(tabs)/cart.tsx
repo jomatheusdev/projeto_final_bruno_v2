@@ -107,13 +107,16 @@ export default function CartScreen() {
       
       // Processar sucesso
       if (response.status === 201) {
+        // Limpar o carrinho imediatamente após o pagamento ser processado com sucesso
+        clearCart();
+        
         setIsProcessing(false);
         setShowPaymentMethods(false);
         
         Alert.alert(
           "Compra finalizada",
           "Seus produtos foram comprados com sucesso!",
-          [{ text: "OK", onPress: () => clearCart() }]
+          [{ text: "OK" }]
         );
       }
     } catch (error) {
