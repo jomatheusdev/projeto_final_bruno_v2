@@ -14,7 +14,7 @@ REGRAS IMPORTANTES:
 2. NÃO INVENTE PRODUTOS QUE NÃO ESTÃO NA LISTA.
 3. SEMPRE INFORME O CLIENTE SOBRE OS PRODUTOS DISPONÍVEIS RELACIONADOS À PERGUNTA DELE.
 4. SE O CLIENTE PERGUNTAR O QUE ESTÁ DISPONÍVEL OU O QUE TEMOS, LISTE OS PRODUTOS DO CONTEXTO.
-5. Quando confirmar a adição de um produto ao carrinho, SEMPRE inclua o ID do produto.
+5. NUNCA SUGIRA ADICIONAR PRODUTOS AO CARRINHO DIRETAMENTE.
 
 Diretrizes:
 - Seja sempre cordial e prestativo
@@ -23,13 +23,14 @@ Diretrizes:
 - Quando o cliente perguntar sobre um produto específico, forneça detalhes como preço, disponibilidade e quantidade
 - Sempre responda em português do Brasil
 
-IMPORTANTE - FUNCIONALIDADE DE CARRINHO (SIGA EXATAMENTE):
-- Quando o cliente pedir para "adicionar ao carrinho" ou "comprar" um produto específico, você DEVE responder com uma mensagem EXATAMENTE no formato: "[ADICIONAR_AO_CARRINHO]ID Mensagem normal"
-- Por exemplo: Se o cliente diz "adicione arroz ao carrinho" e o arroz tem ID 1, responda com "[ADICIONAR_AO_CARRINHO]1 Adicionei arroz ao seu carrinho!"
-- Se o cliente mencionar vários produtos para adicionar, inclua todos os IDs separados por vírgula, exemplo: "[ADICIONAR_AO_CARRINHO]1,2,5 Adicionei arroz, feijão e leite ao seu carrinho!"
-- Se o cliente disser apenas "sim" após você sugerir adicionar um produto específico, USE O FORMATO DE ADIÇÃO AO CARRINHO com o ID do produto que você acabou de sugerir.
-- É ESSENCIAL incluir o ID do produto exatamente após o prefixo [ADICIONAR_AO_CARRINHO] para que o sistema funcione!
-- NUNCA use o prefixo [ADICIONAR_AO_CARRINHO] sem incluir pelo menos um ID numérico logo depois.
+IMPORTANTE - FUNCIONALIDADE DE LISTAGEM DE PRODUTOS (SIGA EXATAMENTE):
+- Quando o cliente pedir para listar produtos, mostrar produtos, ver produtos específicos ou perguntar sobre produtos disponíveis,
+  você DEVE responder com uma mensagem EXATAMENTE no formato: "[LISTAR_PRODUTOS]ID1,ID2,ID3 Mensagem normal"
+- Por exemplo: Se o cliente diz "quais produtos de arroz você tem?" e há produtos com IDs 1, 2, responda com:
+  "[LISTAR_PRODUTOS]1,2 Temos estes tipos de arroz em nossa loja. Posso ajudar com mais informações?"
+- Se o cliente mencionar vários produtos para ver, inclua todos os IDs separados por vírgula.
+- É ESSENCIAL incluir o ID do produto exatamente após o prefixo [LISTAR_PRODUTOS] para que o sistema funcione!
+- NUNCA use o prefixo [LISTAR_PRODUTOS] sem incluir pelo menos um ID numérico logo depois.
 `;
 
 // Template de prompt para responder a perguntas com informações de produtos
@@ -45,10 +46,11 @@ ${availableProducts.map(p =>
 ).join('\n')}
 
 REGRAS CRÍTICAS:
-1. Se o cliente perguntar "o que tem disponível" ou similar, LISTE os produtos acima.
-2. Quando o cliente pedir para adicionar um produto ao carrinho, você DEVE usar o formato: [ADICIONAR_AO_CARRINHO]ID
+1. Se o cliente perguntar "o que tem disponível" ou similar, LISTE os produtos acima usando o formato [LISTAR_PRODUTOS].
+2. Quando o cliente pedir para ver produtos específicos, você DEVE usar o formato: [LISTAR_PRODUTOS]ID
 3. Qualquer produto que não esteja na lista acima NÃO EXISTE para você.
 4. O formato do ID é numérico (ex: 1, 2, 3) - use o número exato que aparece após "ID: " em cada item acima.
+5. NÃO MENCIONE o formato especial [LISTAR_PRODUTOS] em suas explicações ao cliente.
 `;
   } else {
     productContext = `
@@ -65,7 +67,7 @@ ${conversationContext}
 A pergunta atual do cliente é: "${userQuestion}"
 
 Responda de forma útil e amigável, SEMPRE mencionando os produtos disponíveis quando o cliente perguntar sobre disponibilidade.
-LEMBRE-SE: Se o cliente quiser adicionar algo ao carrinho, use exatamente o formato [ADICIONAR_AO_CARRINHO]ID.`;
+LEMBRE-SE: Se o cliente quiser ver produtos específicos, use exatamente o formato [LISTAR_PRODUTOS]ID.`;
 };
 
 // Template para respostas de fallback quando a IA principal falha
@@ -121,19 +123,16 @@ export const extractProductQuery = (userQuestion) => {
   return '';
 };
 
-// Detecta se é um comando para adicionar ao carrinho
-export const isAddToCartCommand = (userQuestion) => {
-  const addToCartPatterns = [
-    /adicionar? (?:ao|no|para o) carrinho/i,
-    /coloc[ae]r? (?:ao|no|para o) carrinho/i,
-    /compr[ae]r?/i,
-    /quero comprar/i,
-    /pod[e]? adicionar/i,
-    /adiciona (?:para|pra) mim/i,
-    /^sim$/i, // Reconhece o "sim" sozinho como possível confirmação
-    /^ok$/i,  // Reconhece "ok" como confirmação
-    /^quero$/i // Reconhece "quero" como confirmação
+// Detecta se é um comando para listar produtos
+export const isListProductsCommand = (userQuestion) => {
+  const listProductsPatterns = [
+    /(?:mostrar?|exibir?|listar?|ver?|quais?|o que tem|tem o quê)\s+(?:produtos?|itens?|mercadorias?)/i,
+    /produtos?\s+(?:disponíveis?|em estoque)/i,
+    /o que\s+(?:vocês? tem|vocês? vendem|está disponível)/i,
+    /quais são os produtos/i,
+    /mostre(?:-me)?\s+os\s+(?:produtos|itens)/i,
+    /quero\s+ver\s+(?:os\s+)?(?:produtos|itens)/i
   ];
   
-  return addToCartPatterns.some(pattern => pattern.test(userQuestion));
+  return listProductsPatterns.some(pattern => pattern.test(userQuestion));
 };

@@ -24,10 +24,18 @@ interface Message {
   timestamp: string;
   action?: string;
   products?: any[];
+  isSystemMessage?: boolean;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  imageUrl?: string;
 }
 
 const Chat = () => {
-  const { addProductsFromAI, addToCart } = useCart();
+  const { addToCart } = useCart();
   const [userName, setUserName] = useState('Usuário');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -40,6 +48,8 @@ const Chat = () => {
   const [lastSentTimestamp, setLastSentTimestamp] = useState(0);
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [productsToShow, setProductsToShow] = useState<Product[]>([]);
+  const [showProductList, setShowProductList] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -72,7 +82,6 @@ const Chat = () => {
       } catch (error) {
         console.error('Erro ao recuperar dados do usuário:', error);
       } finally {
-        // Inicia a primeira conexão
         connectWebSocket();
       }
     };
@@ -84,10 +93,9 @@ const Chat = () => {
     };
   }, []);
 
-  // Limpa conexões e timers ao desmontar o componente
   const cleanupConnection = () => {
     if (ws.current) {
-      ws.current.onclose = null; // Remove o handler de onclose para evitar tentativas de reconexão
+      ws.current.onclose = null;
       ws.current.close();
       ws.current = null;
     }
@@ -98,9 +106,7 @@ const Chat = () => {
     }
   };
 
-  // Função para calcular delay de backoff exponencial
   const getReconnectDelay = () => {
-    // Base de 2 segundos, dobra a cada tentativa até um máximo de 30 segundos
     const baseDelay = 2000;
     const maxDelay = 30000;
     const delay = Math.min(baseDelay * Math.pow(1.5, reconnectAttempts), maxDelay);
@@ -108,7 +114,6 @@ const Chat = () => {
   };
 
   const connectWebSocket = () => {
-    // Se já existe uma conexão ativa, limpe-a primeiro
     if (ws.current) {
       cleanupConnection();
     }
@@ -127,7 +132,7 @@ const Chat = () => {
         console.log('WebSocket conectado!');
         setIsConnected(true);
         setIsLoading(false);
-        setReconnectAttempts(0); // Reseta o contador de tentativas após sucesso
+        setReconnectAttempts(0);
       };
       
       ws.current.onmessage = (event) => {
@@ -136,16 +141,12 @@ const Chat = () => {
           
           if (data.type === 'connected') {
             setUserId(data.userId);
-            // Exibe alerta apenas na primeira conexão ou após desconexão manual
             if (reconnectAttempts === 0) {
               Alert.alert('Conectado', data.message);
             }
           } 
           else if (data.type === 'message') {
-            // Debug
             console.log('Mensagem recebida:', JSON.stringify(data.message));
-            
-            // Processa a mensagem antes de adicioná-la
             const processedMessage = processAIMessage(data.message);
             setMessages(prev => [...prev, processedMessage]);
             
@@ -156,7 +157,6 @@ const Chat = () => {
             }, 100);
           } 
           else if (data.type === 'history') {
-            // Processa mensagens do histórico
             const processedMessages = data.messages.map(processAIMessage);
             setMessages(processedMessages);
           }
@@ -182,9 +182,7 @@ const Chat = () => {
         setIsConnected(false);
         setIsLoading(false);
         
-        // Implementa reconexão automática apenas se ativada
         if (autoReconnect) {
-          // Limita o número máximo de tentativas consecutivas a 10
           if (reconnectAttempts < 10) {
             const reconnectDelay = getReconnectDelay();
             console.log(`Tentando reconectar em ${reconnectDelay / 1000} segundos...`);
@@ -224,7 +222,7 @@ const Chat = () => {
   };
 
   const disconnectWebSocket = () => {
-    setAutoReconnect(false); // Desativa a reconexão automática
+    setAutoReconnect(false);
     
     if (ws.current) {
       try {
@@ -249,40 +247,40 @@ const Chat = () => {
     connectWebSocket();
   };
 
-  const clearChat = () => {
-    Alert.alert(
-      "Limpar Chat",
-      "Tem certeza que deseja limpar todo o histórico de conversa?",
-      [
-        {
-          text: "Cancelar",
-          style: "cancel"
-        },
-        {
-          text: "Limpar",
-          style: "destructive",
-          onPress: () => {
-            setMessages([]);
-            if (ws.current && isConnected) {
+  const startNewConversation = () => {
+    if (ws.current && isConnected) {
+      Alert.alert(
+        "Nova Conversa", 
+        "Deseja iniciar uma nova conversa?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { 
+            text: "Iniciar", 
+            style: "default",
+            onPress: () => {
               try {
-                ws.current.send(JSON.stringify({
-                  type: 'clear_history',
+                ws.current?.send(JSON.stringify({
+                  type: 'new_conversation',
                   sessionId: sessionId
                 }));
+                setProductsToShow([]);
+                setShowProductList(false);
               } catch (error) {
-                console.error('Erro ao enviar comando de limpeza:', error);
+                console.error('Erro ao enviar comando de nova conversa:', error);
+                Alert.alert('Erro', 'Não foi possível iniciar uma nova conversa');
               }
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    } else {
+      Alert.alert('Erro', 'Você precisa estar conectado para iniciar uma nova conversa');
+    }
   };
 
   const handleSend = () => {
     if (!message.trim() || !isConnected || !ws.current) return;
     
-    // Prevenir mensagens duplicadas (mesmo texto enviado em menos de 2 segundos)
     const now = Date.now();
     if (message.trim() === lastSentMessage && now - lastSentTimestamp < 2000) {
       console.log('Prevenindo envio de mensagem duplicada');
@@ -290,7 +288,6 @@ const Chat = () => {
       return;
     }
     
-    // Armazena mensagem e timestamp para prevenção de duplicatas
     setLastSentMessage(message.trim());
     setLastSentTimestamp(now);
 
@@ -301,7 +298,6 @@ const Chat = () => {
         text: message.trim()
       };
       
-      // Envie apenas, não adicione localmente - o servidor fará broadcast
       setMessage('');
       
       ws.current.send(JSON.stringify(messageData));
@@ -327,7 +323,6 @@ const Chat = () => {
     return decodeURIComponent(escape(output));
   };
 
-  // Função para mostrar toast/alert
   const showToast = (message: string) => {
     if (Platform.OS === 'android') {
       ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -336,46 +331,57 @@ const Chat = () => {
     }
   };
   
-  // Função para processar mensagens especiais da IA
   const processAIMessage = (message: any) => {
     try {
-      // Verifica se a mensagem é um JSON com comandos especiais
+      if (message.isSystemMessage) {
+        return message;
+      }
+      
       if (typeof message.text === 'string' && message.text.startsWith('{')) {
         console.log('Detectada possível mensagem JSON da IA:', message.text);
         
         try {
           const data = JSON.parse(message.text);
           
-          if (data.action === 'add_to_cart' && Array.isArray(data.products)) {
-            console.log('Comando de adição ao carrinho detectado!');
+          if (data.action === 'list_products' && Array.isArray(data.products)) {
+            console.log('Comando de listagem de produtos detectado!');
             
             if (data.products.length > 0) {
-              console.log('Produtos para adicionar:', JSON.stringify(data.products));
+              setProductsToShow(data.products);
+              setShowProductList(true);
               
-              // Adiciona os produtos ao carrinho
-              addProductsFromAI(data.products);
+              console.log('Produtos para mostrar:', JSON.stringify(data.products));
               
-              const productNames = data.products.map((p: any) => p.name).join(', ');
-              showToast(`Adicionado ao carrinho: ${productNames}`);
-              
-              // Substitui o JSON por uma mensagem legível
               return {
                 ...message,
-                text: data.text || `Adicionei ${productNames} ao seu carrinho!`
+                text: data.text || `Aqui estão os produtos que você solicitou:`,
+                showProductList: true,
+                productList: data.products
               };
             } else {
-              console.warn('Comando de carrinho sem produtos');
+              console.warn('Comando de listagem sem produtos');
             }
           }
         } catch (jsonError) {
           console.error('Falha ao processar JSON da mensagem:', jsonError);
         }
       }
+      
+      if (message.type === 'new_conversation') {
+        setProductsToShow([]);
+        setShowProductList(false);
+      }
+      
       return message;
     } catch (e) {
       console.log('Erro ao processar mensagem:', e);
       return message;
     }
+  };
+
+  const handleAddToCart = (product: Product) => {
+    addToCart(product);
+    showToast(`${product.name} adicionado ao carrinho`);
   };
 
   if (isLoading) {
@@ -393,19 +399,14 @@ const Chat = () => {
         <Text style={styles.headerTitle}>Chat com Assistente IA</Text>
         <View style={styles.headerButtons}>
           <TouchableOpacity 
-            style={styles.clearButton}
-            onPress={clearChat}
+            style={styles.newChatButton}
+            onPress={startNewConversation}
           >
-            <Ionicons name="trash-outline" size={20} color="white" />
+            <Ionicons name="chatbubble-outline" size={20} color="white" />
+            <Text style={styles.newChatButtonText}>Nova Conversa</Text>
           </TouchableOpacity>
-          {isConnected ? (
-            <TouchableOpacity 
-              style={styles.disconnectButton}
-              onPress={disconnectWebSocket}
-            >
-              <Text style={styles.disconnectButtonText}>Desconectar</Text>
-            </TouchableOpacity>
-          ) : (
+          
+          {!isConnected && (
             <TouchableOpacity 
               style={styles.reconnectButton}
               onPress={manualReconnect}
@@ -448,7 +449,11 @@ const Chat = () => {
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <Balloon message={item} currentUserId={userId} />
+          <Balloon 
+            message={item} 
+            currentUserId={userId}
+            onAddToCart={handleAddToCart} 
+          />
         )}
         ListEmptyComponent={() => (
           <Text style={styles.emptyListText}>
@@ -461,6 +466,29 @@ const Chat = () => {
           }
         }}
       />
+
+      {showProductList && productsToShow.length > 0 && (
+        <View style={styles.productListContainer}>
+          <Text style={styles.productListTitle}>Produtos disponíveis:</Text>
+          <FlatList
+            horizontal
+            data={productsToShow}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => (
+              <View style={styles.productItem}>
+                <Text style={styles.productName}>{item.name}</Text>
+                <Text style={styles.productPrice}>R$ {item.price.toFixed(2)}</Text>
+                <TouchableOpacity 
+                  style={styles.addToCartButton}
+                  onPress={() => handleAddToCart(item)}
+                >
+                  <Text style={styles.addToCartText}>Adicionar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        </View>
+      )}
 
       <View style={styles.inputWrapper}>
         <TextInput
@@ -488,12 +516,23 @@ const Chat = () => {
 const Balloon = ({
   message,
   currentUserId,
+  onAddToCart
 }: {
   message: Message;
   currentUserId: string | null;
+  onAddToCart: (product: any) => void;
 }) => {
   const isAi = message.userId === 'ai-assistant';
   const isSelf = message.userId === currentUserId;
+  const isSystem = message.isSystemMessage;
+  
+  if (isSystem) {
+    return (
+      <View style={styles.systemMessageContainer}>
+        <Text style={styles.systemMessageText}>{message.text}</Text>
+      </View>
+    );
+  }
   
   const bubbleWrapper = isAi ? styles.bubbleWrapperAi : 
                       isSelf ? styles.bubbleWrapperSent : styles.bubbleWrapperReceived;
@@ -515,6 +554,23 @@ const Balloon = ({
         <Text style={styles.timestamp}>
           {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
         </Text>
+        
+        {message.showProductList && message.productList && message.productList.length > 0 && (
+          <View style={styles.inlineProductList}>
+            {message.productList.map((product: any) => (
+              <View key={product.id} style={styles.inlineProductItem}>
+                <Text style={styles.inlineProductName}>• {product.name}</Text>
+                <Text style={styles.inlineProductPrice}>R$ {product.price.toFixed(2)}</Text>
+                <TouchableOpacity 
+                  style={styles.inlineAddButton}
+                  onPress={() => onAddToCart(product)}
+                >
+                  <Text style={styles.inlineAddButtonText}>Adicionar</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -684,21 +740,106 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  clearButton: {
-    backgroundColor: '#6c757d',
+  newChatButton: {
+    backgroundColor: '#28a745',
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 5,
-    marginRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  disconnectButton: {
-    backgroundColor: '#dc3545',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 5,
-  },
-  disconnectButtonText: {
+  newChatButtonText: {
     color: 'white',
+    fontWeight: 'bold',
+    marginLeft: 5,
+  },
+  productListContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 10,
+    borderTopWidth: 1,
+    borderColor: '#ddd',
+  },
+  productListTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  productItem: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 12,
+    marginRight: 10,
+    width: 150,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  productName: {
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  productPrice: {
+    color: 'green',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  addToCartButton: {
+    backgroundColor: '#007bff',
+    borderRadius: 4,
+    padding: 6,
+    alignItems: 'center',
+  },
+  addToCartText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  systemMessageContainer: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  systemMessageText: {
+    color: '#666',
+    fontSize: 14,
+    fontStyle: 'italic',
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  inlineProductList: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.3)',
+    paddingTop: 8,
+  },
+  inlineProductItem: {
+    marginBottom: 8,
+  },
+  inlineProductName: {
+    fontSize: 14,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  inlineProductPrice: {
+    fontSize: 14,
+    color: '#ffff00',
+    marginBottom: 4,
+  },
+  inlineAddButton: {
+    backgroundColor: 'white',
+    borderRadius: 4,
+    padding: 4,
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 2,
+  },
+  inlineAddButtonText: {
+    color: '#8a2be2',
+    fontSize: 12,
     fontWeight: 'bold',
   },
 });

@@ -138,6 +138,120 @@ const ProductSearchService = {
       logAI(`Erro ao buscar produto por ID ${productId}:`, error);
       return null;
     }
+  },
+
+  // Verificar disponibilidade de estoque para uma lista de produtos
+  checkStockAvailability: async (productIds) => {
+    try {
+      if (!productIds || productIds.length === 0) {
+        return { success: false, message: 'Nenhum produto especificado' };
+      }
+      
+      const products = await Product.findAll({
+        where: { id: { [Op.in]: productIds } }
+      });
+      
+      if (products.length === 0) {
+        return { 
+          success: false, 
+          message: 'Nenhum dos produtos solicitados foi encontrado' 
+        };
+      }
+      
+      const unavailableProducts = products.filter(p => p.quantity <= 0);
+      
+      if (unavailableProducts.length > 0) {
+        return {
+          success: false,
+          message: 'Alguns produtos estão indisponíveis',
+          unavailableProducts: unavailableProducts.map(p => ({
+            id: p.id,
+            name: p.name
+          }))
+        };
+      }
+      
+      return {
+        success: true,
+        message: 'Todos os produtos estão disponíveis',
+        products: products.map(p => p.get({ plain: true }))
+      };
+    } catch (error) {
+      logAI('Erro ao verificar disponibilidade de produtos:', error);
+      return { 
+        success: false, 
+        message: 'Erro ao verificar disponibilidade de produtos'
+      };
+    }
+  },
+  
+  // Função para processar a finalização de uma compra
+  finalizePurchase: async (productIds, quantities) => {
+    try {
+      // Verificações de parâmetros
+      if (!productIds || productIds.length === 0) {
+        return { success: false, message: 'Nenhum produto especificado para compra' };
+      }
+      
+      if (!quantities || quantities.length !== productIds.length) {
+        // Se quantidades não forem especificadas, assume 1 para cada produto
+        quantities = productIds.map(() => 1);
+      }
+      
+      // Primeiro verificamos a disponibilidade
+      const stockCheck = await ProductSearchService.checkStockAvailability(productIds);
+      
+      if (!stockCheck.success) {
+        return stockCheck;
+      }
+      
+      // Processar a compra (reduzir o estoque)
+      const productsForPurchase = stockCheck.products;
+      const updatedProducts = [];
+      let totalValue = 0;
+      
+      for (let i = 0; i < productsForPurchase.length; i++) {
+        const product = productsForPurchase[i];
+        const requestedQuantity = quantities[i] || 1;
+        
+        if (product.quantity < requestedQuantity) {
+          return {
+            success: false,
+            message: `Quantidade insuficiente para o produto: ${product.name}`,
+            productId: product.id
+          };
+        }
+        
+        // Atualiza o estoque
+        await Product.update(
+          { quantity: product.quantity - requestedQuantity },
+          { where: { id: product.id } }
+        );
+        
+        updatedProducts.push({
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          quantity: requestedQuantity,
+          subtotal: product.price * requestedQuantity
+        });
+        
+        totalValue += product.price * requestedQuantity;
+      }
+      
+      return {
+        success: true,
+        message: 'Compra realizada com sucesso',
+        purchaseDetails: {
+          products: updatedProducts,
+          totalValue: totalValue,
+          purchaseDate: new Date().toISOString()
+        }
+      };
+    } catch (error) {
+      logAI('Erro ao finalizar compra:', error);
+      return { success: false, message: 'Erro ao processar a compra' };
+    }
   }
 };
 

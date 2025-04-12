@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AI_MODELS, AI_CONFIG, GENERATION_CONFIG, logAI, isValidApiKey } from '../config/aiConfig.js';
-import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isAddToCartCommand } from '../config/prompts.js';
+import { createProductAssistantPrompt, FALLBACK_RESPONSES, TEST_PROMPT, isListProductsCommand } from '../config/prompts.js';
 import ProductSearchService from './ProductSearchService.js';
 
 // Mapa de conexões de usuários
@@ -167,6 +167,10 @@ const aiService = {
             });
           }
         }
+        else if (data.type === 'new_conversation') {
+          // Inicia uma nova conversa
+          aiService.startNewConversation(data.sessionId || sessionId);
+        }
       } catch (error) {
         logAI('Erro ao processar mensagem WebSocket', error);
       }
@@ -188,6 +192,48 @@ const aiService = {
     });
   },
   
+  // Inicia uma nova conversa
+  startNewConversation: (sessionId) => {
+    if (sessionMessages.has(sessionId)) {
+      // Preserva o histórico antigo para referência, mas marca o início de uma nova conversa
+      const history = sessionMessages.get(sessionId) || [];
+      
+      // Adiciona mensagem de sistema indicando início de nova conversa
+      const systemMessage = {
+        id: `system-${Date.now()}`,
+        userId: 'system',
+        userName: 'Sistema',
+        text: '--- Nova conversa iniciada ---',
+        timestamp: new Date().toISOString(),
+        isSystemMessage: true
+      };
+      
+      // Adiciona mensagem de boas-vindas do assistente
+      const welcomeMessage = {
+        id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        userId: 'ai-assistant',
+        userName: AI_CONFIG.assistantName,
+        text: 'Olá! Como posso ajudá-lo com suas compras hoje?',
+        timestamp: new Date().toISOString()
+      };
+      
+      // Adiciona as mensagens ao histórico
+      history.push(systemMessage);
+      history.push(welcomeMessage);
+      
+      // Notifica todos os clientes na sessão
+      aiService.broadcastToSession(sessionId, {
+        type: 'message',
+        message: systemMessage
+      });
+      
+      aiService.broadcastToSession(sessionId, {
+        type: 'message',
+        message: welcomeMessage
+      });
+    }
+  },
+  
   // Processa mensagem com o modelo de IA e envia resposta
   processMessageWithAI: async (userMessage, sessionId) => {
     try {
@@ -206,16 +252,16 @@ const aiService = {
       const history = sessionMessages.get(sessionId) || [];
       const recentMessages = history
         .slice(-AI_CONFIG.contextMessageLimit)
-        .filter(msg => msg.userId !== 'ai-assistant');
+        .filter(msg => msg.userId !== 'ai-assistant' && !msg.isSystemMessage);
       
       const conversationContext = recentMessages
         .map(msg => `${msg.userName}: ${msg.text}`)
         .join('\n');
       
-      // Verificar se é uma intenção de adicionar ao carrinho
-      const isCartCommand = isAddToCartCommand(userMessage.text);
-      if (isCartCommand) {
-        logAI('Detectado comando de adicionar ao carrinho');
+      // Verificar se é uma intenção de listar produtos
+      const isListCommand = isListProductsCommand(userMessage.text);
+      if (isListCommand) {
+        logAI('Detectado comando de listar produtos');
       }
       
       // Busca produtos relacionados à pergunta do usuário
@@ -258,8 +304,8 @@ const aiService = {
           const response = result.response;
           aiResponse = response.text();
           
-          // Analisa a resposta para comandos de carrinho
-          const processedResponse = parseCartCommands(aiResponse, relatedProducts);
+          // Analisa a resposta para comandos de listagem de produtos
+          const processedResponse = parseProductListingCommand(aiResponse, relatedProducts);
           aiResponse = processedResponse;
         } else {
           throw new Error('Modelo Gemini não disponível');
@@ -328,14 +374,14 @@ const aiService = {
   }
 };
 
-// Função para processar comandos de carrinho na resposta da IA
-function parseCartCommands(response, availableProducts) {
-  // Verifica se a resposta contém comando de adicionar ao carrinho
-  const cartCommandRegex = /\[ADICIONAR_AO_CARRINHO\]([0-9,]+)\s+(.*)/i;
-  const match = response.match(cartCommandRegex);
+// Função para processar comandos de listagem de produtos na resposta da IA
+function parseProductListingCommand(response, availableProducts) {
+  // Verifica se a resposta contém comando para listar produtos
+  const listCommandRegex = /\[LISTAR_PRODUTOS\]([0-9,]+)\s+(.*)/i;
+  const match = response.match(listCommandRegex);
   
   if (match) {
-    logAI(`Comando de carrinho detectado! Texto original: "${response}"`);
+    logAI(`Comando de listagem de produtos detectado! Texto original: "${response}"`);
     
     const productIds = match[1].split(',').map(id => id.trim());
     const messageText = match[2];
@@ -343,12 +389,12 @@ function parseCartCommands(response, availableProducts) {
     logAI(`IDs de produtos extraídos: ${productIds.join(', ')}`);
     
     if (productIds.length === 0 || productIds[0] === '') {
-      logAI('Comando de carrinho detectado, mas sem IDs de produto válidos');
+      logAI('Comando de listagem detectado, mas sem IDs de produto válidos');
       return response;
     }
     
     // Preparar informações dos produtos para enviar ao cliente
-    const productsToAdd = [];
+    const productsToList = [];
     
     for (const id of productIds) {
       // Busca pelo produto correspondente
@@ -356,30 +402,30 @@ function parseCartCommands(response, availableProducts) {
       
       if (product) {
         logAI(`Produto encontrado para ID ${id}: ${product.name}`);
-        productsToAdd.push({
+        productsToList.push({
           id: product.id,
           name: product.name,
-          price: product.price
+          price: product.price,
+          imageUrl: product.imageUrl || ''
         });
       } else {
         logAI(`ERRO: Produto com ID ${id} não encontrado na lista de ${availableProducts.length} produtos disponíveis`);
-        logAI(`IDs disponíveis: ${availableProducts.map(p => p.id).join(', ')}`);
       }
     }
     
-    if (productsToAdd.length === 0) {
-      logAI('Nenhum produto válido para adicionar ao carrinho');
+    if (productsToList.length === 0) {
+      logAI('Nenhum produto válido para listar');
       return response; // Retorna a resposta original se não encontrou produtos
     }
     
-    // Log dos produtos que serão adicionados
-    logAI(`Adicionando ao carrinho ${productsToAdd.length} produto(s): ${productsToAdd.map(p => p.name).join(', ')}`);
+    // Log dos produtos que serão listados
+    logAI(`Listando ${productsToList.length} produto(s): ${productsToList.map(p => p.name).join(', ')}`);
     
     // Reformatar a mensagem para incluir metadados de produto
     return JSON.stringify({
       text: messageText,
-      action: 'add_to_cart',
-      products: productsToAdd
+      action: 'list_products',
+      products: productsToList
     });
   }
   
