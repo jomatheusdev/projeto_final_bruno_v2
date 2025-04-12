@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useCart } from '../../context/CartContext'; 
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
 interface PaymentMethod {
   id: string;
@@ -24,6 +26,7 @@ export default function CartScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
+  const SERVER_URL = 'http://192.168.0.105:3000';
   
   const paymentMethods: PaymentMethod[] = [
     { id: 'credit', name: 'Cartão de Crédito', icon: 'card-outline' },
@@ -59,31 +62,72 @@ export default function CartScreen() {
 
   const handlePaymentSelection = (methodId: string) => {
     setSelectedPaymentMethod(methodId);
-    
-    Alert.alert(
-      "Confirmar compra",
-      `Deseja finalizar a compra usando ${paymentMethods.find(m => m.id === methodId)?.name}?`,
-      [
-        { text: "Cancelar", style: "cancel", onPress: () => setSelectedPaymentMethod(null) },
-        { text: "Confirmar", onPress: processPayment }
-      ]
-    );
+    processPayment(methodId);
   };
 
-  const processPayment = () => {
+  const processPayment = async (methodId: string) => {
+    if (cartItems.length === 0) {
+      return;
+    }
+    
     setIsProcessing(true);
     
-    // Simulação de processamento de pagamento
-    setTimeout(() => {
-      setIsProcessing(false);
-      setShowPaymentMethods(false);
+    try {
+      // Preparar dados para envio
+      const total = calculateTotal();
+      const items = cartItems.map(item => ({
+        id: item.id,
+        quantity: item.quantity || 1,
+        price: item.price
+      }));
       
-      Alert.alert(
-        "Compra finalizada",
-        "Seus produtos foram comprados com sucesso!",
-        [{ text: "OK", onPress: () => clearCart() }]
+      // Obter token de autenticação
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        Alert.alert('Erro', 'Você precisa estar logado para finalizar a compra');
+        setIsProcessing(false);
+        return;
+      }
+      
+      // Enviar pedido para o servidor
+      const response = await axios.post(
+        `${SERVER_URL}/api/orders`,
+        {
+          items,
+          total,
+          paymentMethod: methodId,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
       );
-    }, 2000);
+      
+      // Processar sucesso
+      if (response.status === 201) {
+        setIsProcessing(false);
+        setShowPaymentMethods(false);
+        
+        Alert.alert(
+          "Compra finalizada",
+          "Seus produtos foram comprados com sucesso!",
+          [{ text: "OK", onPress: () => clearCart() }]
+        );
+      }
+    } catch (error) {
+      setIsProcessing(false);
+      
+      // Processar erro
+      let errorMessage = 'Ocorreu um erro ao processar o pagamento';
+      
+      if (axios.isAxiosError(error) && error.response) {
+        errorMessage = error.response.data.message || errorMessage;
+      }
+      
+      Alert.alert("Erro na compra", errorMessage);
+    }
   };
   
   const renderCartItem = ({ item }) => (

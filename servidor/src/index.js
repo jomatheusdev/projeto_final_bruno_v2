@@ -7,6 +7,7 @@ import { URL } from 'url'; // Importar URL para parsing
 import userRouter from './routers/UserRouters.js';
 import productRouter from './routers/ProductRouters.js';
 import paymentRouter from './routers/PaymentRouter.js';
+import orderRouter from './routers/OrderRouters.js';
 import sequelize from './config/db.js';
 import aiService from './services/AiService.js';
 import DatabaseSeedService from './services/DatabaseSeedService.js';
@@ -19,6 +20,7 @@ app.use(cors());
 app.use('/api', userRouter);
 app.use('/api', productRouter);
 app.use('/api', paymentRouter);
+app.use('/api', orderRouter);
 
 // Cria servidor HTTP a partir do app Express
 const server = http.createServer(app);
